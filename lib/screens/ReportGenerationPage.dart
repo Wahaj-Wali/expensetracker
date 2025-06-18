@@ -1,8 +1,9 @@
-// ReportGenerationPage.dart
+// Enhanced ReportGenerationPage.dart with Sales Tax Features
 import 'package:ExpenseTracker/widgets/CircularMenuWidget.dart';
 import 'package:flutter/material.dart';
 import 'package:ExpenseTracker/Services/ReportController.dart';
 import 'package:ExpenseTracker/widgets/CustomBottomNavigationBar.dart';
+import 'package:intl/intl.dart';
 
 class ReportGenerationPage extends StatefulWidget {
   const ReportGenerationPage({Key? key}) : super(key: key);
@@ -14,15 +15,35 @@ class ReportGenerationPage extends StatefulWidget {
 class _ReportGenerationPageState extends State<ReportGenerationPage> {
   final ReportController _reportController = ReportController();
   int _selectedYear = DateTime.now().year;
+  int _selectedMonth = DateTime.now().month;
   bool _isGenerating = false;
   String? _reportFilePath;
   String? _statusMessage;
   bool _isSuccess = false;
-  final int _activeIndex = 3;
+  Map<String, dynamic>? _salesTaxSummary;
+  String _reportType = 'annual'; // 'annual' or 'monthly'
+  final int _activeIndex = 4;
 
   List<int> get availableYears {
     final currentYear = DateTime.now().year;
     return List.generate(5, (index) => currentYear - index);
+  }
+
+  List<Map<String, dynamic>> get availableMonths {
+    return [
+      {'value': 1, 'name': 'January'},
+      {'value': 2, 'name': 'February'},
+      {'value': 3, 'name': 'March'},
+      {'value': 4, 'name': 'April'},
+      {'value': 5, 'name': 'May'},
+      {'value': 6, 'name': 'June'},
+      {'value': 7, 'name': 'July'},
+      {'value': 8, 'name': 'August'},
+      {'value': 9, 'name': 'September'},
+      {'value': 10, 'name': 'October'},
+      {'value': 11, 'name': 'November'},
+      {'value': 12, 'name': 'December'},
+    ];
   }
 
   Future<void> _generateReport() async {
@@ -31,9 +52,17 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
       _statusMessage = null;
       _reportFilePath = null;
       _isSuccess = false;
+      _salesTaxSummary = null;
     });
 
-    final result = await _reportController.generateAnnualReport(_selectedYear);
+    Map<String, dynamic> result;
+
+    if (_reportType == 'annual') {
+      result = await _reportController.generateAnnualReport(_selectedYear);
+    } else {
+      result = await _reportController.generateMonthlyReport(
+          _selectedYear, _selectedMonth);
+    }
 
     setState(() {
       _isGenerating = false;
@@ -41,6 +70,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
       _isSuccess = result['success'];
       if (result['success']) {
         _reportFilePath = result['filePath'];
+        _salesTaxSummary = result['salesTaxSummary'];
       }
     });
   }
