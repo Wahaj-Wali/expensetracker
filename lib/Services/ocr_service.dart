@@ -1,22 +1,62 @@
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 
-class OCRService {
-  static final TextRecognizer _textRecognizer = TextRecognizer();
+class ExpenseOCRService {
+  static const String baseUrl =
+      'http://192.168.157.83:5000'; // Replace with your Flask server URL
 
-  static Future<String> extractTextFromImage(File imageFile) async {
+  static Future<Map<String, dynamic>> processReceipt(File imageFile) async {
     try {
-      final inputImage = InputImage.fromFile(imageFile);
-      final RecognizedText recognizedText =
-          await _textRecognizer.processImage(inputImage);
+      // Convert image to base64
+      List<int> imageBytes = await imageFile.readAsBytes();
+      String base64Image = base64Encode(imageBytes);
 
-      return recognizedText.text;
+      final response = await http.post(
+        Uri.parse('$baseUrl/process-receipt'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'image_base64': base64Image,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to process receipt: ${response.statusCode}');
+      }
     } catch (e) {
-      throw Exception('Failed to extract text from image: $e');
+      throw Exception('Error processing receipt: $e');
     }
   }
 
-  static void dispose() {
-    _textRecognizer.close();
+  static Future<Map<String, dynamic>> validateTax({
+    required double subtotal,
+    required double taxAmount,
+    double? taxRate,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/validate-tax'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'subtotal': subtotal,
+          'tax_amount': taxAmount,
+          'tax_rate': taxRate,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to validate tax: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error validating tax: $e');
+    }
   }
 }
