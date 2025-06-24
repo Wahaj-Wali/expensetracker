@@ -1,10 +1,12 @@
 import 'dart:developer';
+import 'package:ExpenseTracker/Services/CategoriesService.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:ExpenseTracker/main.dart';
 import 'package:ExpenseTracker/screens/HomeScreen.dart';
 import 'package:ExpenseTracker/screens/SetPassword.dart';
+// Import the new service
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -52,6 +54,9 @@ class AuthService {
         'user_type': 'basic user',
         'is_tried': false,
       });
+
+      // Create default categories for the new user
+      await DefaultCategoriesService.createDefaultCategories(email);
 
       // Return user data as a map
       return {'email': email, 'auth_id': authId};
@@ -154,6 +159,8 @@ class AuthService {
           .limit(1)
           .get();
 
+      bool isNewUser = querySnapshot.docs.isEmpty;
+
       if (querySnapshot.docs.isNotEmpty) {
         final userDoc = querySnapshot.docs.first;
         final password = userDoc['password'];
@@ -163,7 +170,7 @@ class AuthService {
           await userDoc.reference.update({'user_type': 'basic user'});
         }
 
-        // Save the profile image URL if it’s not already set in Firestore
+        // Save the profile image URL if it's not already set in Firestore
         if (photoURL != null && userDoc['profile_img'] == null) {
           await userDoc.reference.update({'profile_img': photoURL});
         }
@@ -203,6 +210,9 @@ class AuthService {
           'user_type': 'basic user',
           'profile_img': photoURL, // Save profile image URL
         });
+
+        // Create default categories for the new user
+        await DefaultCategoriesService.createDefaultCategories(email);
 
         // Redirect to SetPassword screen
         WidgetsBinding.instance.addPostFrameCallback((_) {
