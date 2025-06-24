@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:ExpenseTracker/widgets/custom_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,7 +34,6 @@ class _IconSearchMenuState extends State<IconSearchMenu> {
     'Taxi': Icons.local_taxi,
 
     // Utilities
-
     'Plumbing': Icons.plumbing,
 
     // Entertainment
@@ -50,13 +50,11 @@ class _IconSearchMenuState extends State<IconSearchMenu> {
     'Gym': Icons.fitness_center,
     'Hospital': Icons.local_hospital,
     'Pharmacy': Icons.local_pharmacy,
-
     'FirstAid': Icons.healing,
 
     // Home and Rent
     'Rent': Icons.home,
     'Apartment': Icons.apartment,
-
     'Kitchen': Icons.kitchen,
     'Furniture': Icons.weekend,
     // Add more icons as needed
@@ -80,8 +78,7 @@ class _IconSearchMenuState extends State<IconSearchMenu> {
         ),
       ),
       child: Scaffold(
-        backgroundColor:
-            Colors.transparent, // Make scaffold background transparent
+        backgroundColor: Colors.transparent,
         appBar: PreferredSize(
           preferredSize: const Size.fromHeight(kToolbarHeight),
           child: Container(
@@ -93,8 +90,7 @@ class _IconSearchMenuState extends State<IconSearchMenu> {
               ),
             ),
             child: AppBar(
-              backgroundColor:
-                  Colors.transparent, // Make AppBar background transparent
+              backgroundColor: Colors.transparent,
               elevation: 0,
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.black),
@@ -258,41 +254,78 @@ class _AddCategoryPageState extends State<AddCategoryPage>
   Color selectedIconColor = Colors.blue;
   TextEditingController categoryNameController = TextEditingController();
 
+  // Sales Tax Controls
+  bool isSalesTaxApplicable = true;
+  double salesTaxPercentage = 18.0; // Default Pakistan GST rate
+  TextEditingController salesTaxController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 150), // Faster response time
+      duration: const Duration(milliseconds: 150),
     );
     _animation =
         Tween<double>(begin: bottomContainerHeight, end: bottomContainerHeight)
             .animate(_controller);
+
+    // Initialize sales tax controller with default value
+    salesTaxController.text = salesTaxPercentage.toString();
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    categoryNameController.dispose();
+    salesTaxController.dispose();
     super.dispose();
   }
 
   void onContinuePressed() async {
-    // Validate input
     await CustomLoader.showLoaderForTask(
         context: context,
         task: () async {
-          //Code
           if (selectedIcon != null && categoryNameController.text.isNotEmpty) {
             SharedPreferences prefs = await SharedPreferences.getInstance();
             String? email = prefs.getString('email');
 
-            // Create category data with the icon name
+            // Validate sales tax percentage
+            double finalSalesTaxPercentage = 0.0;
+            if (isSalesTaxApplicable) {
+              if (salesTaxController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Please enter sales tax percentage.')),
+                );
+                return;
+              }
+
+              finalSalesTaxPercentage =
+                  double.tryParse(salesTaxController.text) ?? 0.0;
+              if (finalSalesTaxPercentage < 0 ||
+                  finalSalesTaxPercentage > 100) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text(
+                          'Sales tax percentage must be between 0 and 100.')),
+                );
+                return;
+              }
+            }
+
+            // Create category data with sales tax information
             final categoryData = {
-              'iconName': selectedIconName, // Save the selected icon name here
-              'iconColor':
-                  _colorToHex(selectedIconColor), // Store color as a hex string
+              'iconName': selectedIconName,
+              'iconColor': _colorToHex(selectedIconColor),
               'name': categoryNameController.text,
               'email': email,
+              'salesTaxApplicable': isSalesTaxApplicable,
+              'salesTaxPercentage': finalSalesTaxPercentage,
+              'salesTaxRate': finalSalesTaxPercentage /
+                  100, // Store as decimal for calculations
+              'createdAt': FieldValue.serverTimestamp(),
+              'isCustomCategory': true, // Mark as custom admin category
             };
 
             // Store in Firestore
@@ -300,10 +333,18 @@ class _AddCategoryPageState extends State<AddCategoryPage>
                 .collection('categories')
                 .add(categoryData);
 
-            // Optionally, navigate back or show a success message
+            // Show success message
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Category "${categoryNameController.text}" created successfully!',
+                ),
+                backgroundColor: Colors.green,
+              ),
+            );
+
             Navigator.pop(context);
           } else {
-            // Show an error message if validation fails
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                   content:
@@ -315,9 +356,7 @@ class _AddCategoryPageState extends State<AddCategoryPage>
 
   void onVerticalDragUpdate(DragUpdateDetails details) {
     setState(() {
-      // Increase sensitivity to make scrolling faster
-      bottomContainerHeight -=
-          details.delta.dy * 1.7; // Increase scroll sensitivity
+      bottomContainerHeight -= details.delta.dy * 1.7;
       if (bottomContainerHeight > maxHeight) bottomContainerHeight = maxHeight;
       if (bottomContainerHeight < minHeight) bottomContainerHeight = minHeight;
     });
@@ -328,12 +367,11 @@ class _AddCategoryPageState extends State<AddCategoryPage>
   }
 
   void onVerticalDragEnd(DragEndDetails details) {
-    // Adjust spring physics for a faster snap back and reaction
     final velocity = details.primaryVelocity ?? 0;
     const spring = SpringDescription(
       mass: 1,
-      stiffness: 2000, // Increased stiffness for faster spring action
-      damping: 7, // Further lowered damping for quicker response
+      stiffness: 2000,
+      damping: 7,
     );
 
     final simulation = SpringSimulation(
@@ -342,12 +380,8 @@ class _AddCategoryPageState extends State<AddCategoryPage>
     _controller.animateWith(simulation);
   }
 
-  // Holds the selected icon
-  Color pickerColor =
-      const Color.fromRGBO(126, 61, 255, 1); // Default color for the picker
-  // Color applied to selected icon and menu
+  Color pickerColor = const Color.fromRGBO(126, 61, 255, 1);
 
-  // Function to show the color picker dialog
   void _showColorPicker() {
     showDialog(
       barrierColor: const Color.fromARGB(128, 0, 0, 0),
@@ -386,8 +420,7 @@ class _AddCategoryPageState extends State<AddCategoryPage>
               child: const Text('Done'),
               onPressed: () {
                 setState(() {
-                  selectedIconColor =
-                      pickerColor; // Update the selected icon color
+                  selectedIconColor = pickerColor;
                 });
                 Navigator.of(context).pop();
               },
@@ -406,7 +439,7 @@ class _AddCategoryPageState extends State<AddCategoryPage>
           onIconSelected: (iconData, iconName) {
             setState(() {
               selectedIcon = iconData;
-              selectedIconName = iconName; // Save the selected icon name
+              selectedIconName = iconName;
             });
           },
           iconColor: selectedIconColor,
@@ -563,6 +596,224 @@ class _AddCategoryPageState extends State<AddCategoryPage>
             ),
           ),
 
+          // Sales Tax Section
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 3,
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.account_balance,
+                        color: selectedIconColor,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Sales Tax Configuration',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Sales Tax Applicable Switch
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Sales Tax Applicable',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Switch(
+                        value: isSalesTaxApplicable,
+                        onChanged: (value) {
+                          setState(() {
+                            isSalesTaxApplicable = value;
+                            if (!value) {
+                              salesTaxController.text = '0';
+                              salesTaxPercentage = 0.0;
+                            } else {
+                              salesTaxController.text = '18.0';
+                              salesTaxPercentage = 18.0;
+                            }
+                          });
+                        },
+                        activeColor: selectedIconColor,
+                      ),
+                    ],
+                  ),
+
+                  // Sales Tax Percentage Input (only if applicable)
+                  if (isSalesTaxApplicable) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: salesTaxController,
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d*\.?\d*')),
+                            ],
+                            decoration: InputDecoration(
+                              labelText: "Tax Percentage (%)",
+                              labelStyle: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: Colors.grey.shade300),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: Colors.grey.shade300),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: selectedIconColor),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                salesTaxPercentage =
+                                    double.tryParse(value) ?? 0.0;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Quick preset buttons
+                        Column(
+                          children: [
+                            _buildQuickTaxButton('0%', 0.0),
+                            const SizedBox(height: 4),
+                            _buildQuickTaxButton('18%', 18.0),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Standard Pakistan GST rate is 18%',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          // Preview Section
+          if (selectedIcon != null ||
+              categoryNameController.text.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: selectedIconColor.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: selectedIconColor.withOpacity(0.2),
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Preview',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: selectedIconColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          selectedIcon ?? Icons.category_rounded,
+                          color: selectedIconColor,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              categoryNameController.text.isEmpty
+                                  ? 'Category Name'
+                                  : categoryNameController.text,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isSalesTaxApplicable
+                                  ? 'Tax: ${salesTaxPercentage.toStringAsFixed(1)}%'
+                                  : 'Tax: Exempt',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           // Continue Button
           Container(
             margin: const EdgeInsets.only(top: 24),
@@ -576,7 +827,7 @@ class _AddCategoryPageState extends State<AddCategoryPage>
                 ),
               ),
               child: const Text(
-                'Continue',
+                'Create Category',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -586,6 +837,40 @@ class _AddCategoryPageState extends State<AddCategoryPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuickTaxButton(String label, double percentage) {
+    return SizedBox(
+      width: 45,
+      height: 32,
+      child: ElevatedButton(
+        onPressed: () {
+          setState(() {
+            salesTaxPercentage = percentage;
+            salesTaxController.text = percentage.toString();
+          });
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: salesTaxPercentage == percentage
+              ? selectedIconColor
+              : Colors.grey.shade200,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(6),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+            color: salesTaxPercentage == percentage
+                ? Colors.white
+                : Colors.grey.shade700,
+          ),
+        ),
       ),
     );
   }
