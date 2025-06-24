@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore package
 import 'package:ExpenseTracker/screens/AddCategoryPage.dart';
-import 'package:ExpenseTracker/widgets/CircularMenuWidget.dart';
-import 'package:ExpenseTracker/widgets/CustomBottomNavigationBar.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 class CategoriesPage extends StatefulWidget {
@@ -13,13 +12,70 @@ class CategoriesPage extends StatefulWidget {
 }
 
 class _CategoriesPageState extends State<CategoriesPage> {
-  final int _activeIndex = 1;
   List<Map<String, dynamic>> _categoryItems = [];
 
   @override
   void initState() {
     super.initState();
+    initializeDefaultCategories();
     fetchCategories();
+  }
+
+  // Function to create default categories for new users
+  Future<void> initializeDefaultCategories() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) return;
+
+      // Check if user already has categories
+      QuerySnapshot userCategories = await FirebaseFirestore.instance
+          .collection('categories')
+          .where('email', isEqualTo: email)
+          .get();
+
+      // If user has no categories, create default ones
+      if (userCategories.docs.isEmpty) {
+        await createDefaultCategories(email);
+      }
+    } catch (e) {
+      print("Error initializing default categories: $e");
+    }
+  }
+
+  // Function to create default categories
+  Future<void> createDefaultCategories(String email) async {
+    final defaultCategories = [
+      {
+        'iconName': 'Restaurant',
+        'name': 'Food & Drinks',
+        'iconColor': '#FF6B6B'
+      },
+      {'iconName': 'Car', 'name': 'Transportation', 'iconColor': '#4ECDC4'},
+      {'iconName': 'Groceries', 'name': 'Shopping', 'iconColor': '#45B7D1'},
+      {'iconName': 'Movie', 'name': 'Entertainment', 'iconColor': '#96CEB4'},
+      {'iconName': 'Hospital', 'name': 'Health', 'iconColor': '#FFEAA7'},
+      {'iconName': 'Rent', 'name': 'Housing', 'iconColor': '#DDA0DD'},
+      {'iconName': 'Plumbing', 'name': 'Utilities', 'iconColor': '#98D8C8'},
+      {'iconName': 'Gym', 'name': 'Fitness', 'iconColor': '#F7DC6F'},
+    ];
+
+    WriteBatch batch = FirebaseFirestore.instance.batch();
+
+    for (var category in defaultCategories) {
+      DocumentReference docRef =
+          FirebaseFirestore.instance.collection('categories').doc();
+      batch.set(docRef, {
+        'iconName': category['iconName'],
+        'name': category['name'],
+        'iconColor': category['iconColor'],
+        'email': email,
+        'isDefault': true, // Mark as default category
+      });
+    }
+
+    await batch.commit();
   }
 
   // Function to fetch categories from Firestore
@@ -43,6 +99,9 @@ class _CategoriesPageState extends State<CategoriesPage> {
           "name": doc['name'], // The name of the category
           "iconColor":
               doc['iconColor'], // Assuming the color is stored as a hex string
+          "isDefault": doc.data().toString().contains('isDefault')
+              ? doc['isDefault']
+              : false,
         };
       }).toList();
 
@@ -54,9 +113,9 @@ class _CategoriesPageState extends State<CategoriesPage> {
     }
   }
 
-  // Function to delete category
   // Function to delete category and its related transactions
-  Future<void> deleteCategory(String categoryId, String categoryName) async {
+  Future<void> deleteCategory(
+      String categoryId, String categoryName, bool isDefault) async {
     try {
       // Get user email from SharedPreferences
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -129,7 +188,6 @@ class _CategoriesPageState extends State<CategoriesPage> {
     'Taxi': Icons.local_taxi,
 
     // Utilities
-
     'Plumbing': Icons.plumbing,
 
     // Entertainment
@@ -146,13 +204,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
     'Gym': Icons.fitness_center,
     'Hospital': Icons.local_hospital,
     'Pharmacy': Icons.local_pharmacy,
-
     'FirstAid': Icons.healing,
 
     // Home and Rent
     'Rent': Icons.home,
     'Apartment': Icons.apartment,
-
     'Kitchen': Icons.kitchen,
     'Furniture': Icons.weekend,
     // Add more icons as needed
@@ -164,15 +220,18 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   // Show delete confirmation dialog
-  void _showDeleteConfirmationDialog(String id, String categoryName) {
+  void _showDeleteConfirmationDialog(
+      String id, String categoryName, bool isDefault) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Delete Category'),
-          content: const Text(
-            'Do you want to delete this category? All related transactions will also be deleted.',
-            style: TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
+          content: Text(
+            isDefault
+                ? 'Do you want to delete this default category? All related transactions will also be deleted.'
+                : 'Do you want to delete this category? All related transactions will also be deleted.',
+            style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
           ),
           actions: [
             TextButton(
@@ -187,7 +246,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                 style: TextStyle(color: Colors.red),
               ),
               onPressed: () {
-                deleteCategory(id, categoryName);
+                deleteCategory(id, categoryName, isDefault);
                 Navigator.of(context).pop();
               },
             ),
@@ -256,17 +315,46 @@ class _CategoriesPageState extends State<CategoriesPage> {
                               item['iconColor'].replaceFirst('#', '0xFF'))),
                         ),
                       ),
-                      title: Text(
-                        item['name'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                      title: Row(
+                        children: [
+                          Text(
+                            item['name'],
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          if (item['isDefault'] == true)
+                            Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color.fromRGBO(127, 61, 255, 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'Default',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color.fromRGBO(127, 61, 255, 1),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
+                        icon: Icon(
+                          item['isDefault'] == true
+                              ? Icons.lock_outline
+                              : Icons.delete_outline,
+                          color: item['isDefault'] == true ? Colors.grey : null,
+                        ),
                         onPressed: () => _showDeleteConfirmationDialog(
-                            item['id'], item['name']),
+                            item['id'],
+                            item['name'],
+                            item['isDefault'] ?? false),
                       ),
                     ),
                   ))
@@ -320,11 +408,6 @@ class _CategoriesPageState extends State<CategoriesPage> {
           ),
         ],
       ),
-      bottomNavigationBar: CustomBottomNavigationBar(
-        activeIndex: _activeIndex,
-      ),
-      floatingActionButton: const CircularMenuWidget(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
   }
 }
