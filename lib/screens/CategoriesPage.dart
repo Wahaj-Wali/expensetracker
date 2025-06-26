@@ -24,20 +24,15 @@ class _CategoriesPageState extends State<CategoriesPage> {
   // Function to create default categories for new users
   Future<void> initializeDefaultCategories() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? email = prefs.getString('email');
-
-      if (email == null) return;
-
-      // Check if user already has categories
-      QuerySnapshot userCategories = await FirebaseFirestore.instance
+      // Check if any default categories exist (not user-specific anymore)
+      QuerySnapshot defaultCategories = await FirebaseFirestore.instance
           .collection('categories')
-          .where('email', isEqualTo: email)
+          .where('isDefault', isEqualTo: true)
           .get();
 
-      // If user has no categories, create default ones
-      if (userCategories.docs.isEmpty) {
-        await createDefaultCategories(email);
+      // If no default categories exist, create them
+      if (defaultCategories.docs.isEmpty) {
+        await createDefaultCategories();
       }
     } catch (e) {
       print("Error initializing default categories: $e");
@@ -45,7 +40,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   // Function to create default categories
-  Future<void> createDefaultCategories(String email) async {
+  // 1. Fix initializeDefaultCategories() method:
+
+// 2. Fix createDefaultCategories() method:
+  Future<void> createDefaultCategories() async {
     final defaultCategories = [
       {
         'iconName': 'Restaurant',
@@ -70,8 +68,12 @@ class _CategoriesPageState extends State<CategoriesPage> {
         'iconName': category['iconName'],
         'name': category['name'],
         'iconColor': category['iconColor'],
-        'email': email,
+        // 'email': email, // REMOVED - no longer user-specific
         'isDefault': true, // Mark as default category
+        'salesTaxApplicable': true,
+        'salesTaxPercentage': 18.0,
+        'salesTaxRate': 0.18,
+        'createdAt': FieldValue.serverTimestamp(),
       });
     }
 
@@ -81,14 +83,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
   // Function to fetch categories from Firestore
   Future<void> fetchCategories() async {
     try {
-      // Get email from SharedPreferences
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? email = prefs.getString('email');
-
-      // Fetch data from Firestore filtered by email
+      // Fetch ALL categories from Firestore (no email filtering)
       QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection('categories')
-          .where('email', isEqualTo: email) // Filter categories by email
+          .orderBy('createdAt',
+              descending: false) // Optional: order by creation date
           .get();
 
       List<Map<String, dynamic>> categories = snapshot.docs.map((doc) {
@@ -117,7 +116,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   Future<void> deleteCategory(
       String categoryId, String categoryName, bool isDefault) async {
     try {
-      // Get user email from SharedPreferences
+      // Get user email from SharedPreferences (still needed for transactions)
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? email = prefs.getString('email');
 
@@ -131,7 +130,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
       // Delete the category
       batch.delete(categoryRef);
 
-      // Get all related transactions
+      // Get all related transactions (transactions are still user-specific)
       QuerySnapshot transactionsSnapshot = await FirebaseFirestore.instance
           .collection('transactions')
           .where('email', isEqualTo: email)

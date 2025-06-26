@@ -287,9 +287,6 @@ class _AddCategoryPageState extends State<AddCategoryPage>
         context: context,
         task: () async {
           if (selectedIcon != null && categoryNameController.text.isNotEmpty) {
-            SharedPreferences prefs = await SharedPreferences.getInstance();
-            String? email = prefs.getString('email');
-
             // Validate sales tax percentage
             double finalSalesTaxPercentage = 0.0;
             if (isSalesTaxApplicable) {
@@ -319,19 +316,16 @@ class _AddCategoryPageState extends State<AddCategoryPage>
               'iconName': selectedIconName,
               'iconColor': _colorToHex(selectedIconColor),
               'name': categoryNameController.text,
-              'email': email,
+              // 'email': email, // REMOVED - no longer user-specific
               'salesTaxApplicable': isSalesTaxApplicable,
               'salesTaxPercentage': finalSalesTaxPercentage,
-              'salesTaxRate': finalSalesTaxPercentage /
-                  100, // Store as decimal for calculations
+              'salesTaxRate': finalSalesTaxPercentage / 100,
               'createdAt': FieldValue.serverTimestamp(),
-              'isCustomCategory': true, // Mark as custom admin category
+              'isCustomCategory': true,
             };
 
             // Store in Firestore
-            await FirebaseFirestore.instance
-                .collection('categories')
-                .add(categoryData);
+            await FirebaseFirestore.instance.collection('categories').get();
 
             // Show success message
             ScaffoldMessenger.of(context).showSnackBar(

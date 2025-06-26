@@ -180,8 +180,26 @@ class _AddExpensePageState extends State<AddExpensePage>
                   'timestamp': Timestamp.now(),
                   'transaction_id': tId,
                   'transaction_type': 'Expense',
+                  // Add tax-related fields
+                  'sales_tax_applicable':
+                      selectedCategory!['salesTaxApplicable'] ?? false,
+                  'sales_tax_percentage':
+                      selectedCategory!['salesTaxPercentage'] ?? 0.0,
+                  'sales_tax_amount':
+                      (selectedCategory!['salesTaxApplicable'] ?? false)
+                          ? _originalAmount *
+                              ((selectedCategory!['salesTaxPercentage'] ??
+                                      0.0) /
+                                  100)
+                          : 0.0,
+                  'total_amount_with_tax': _originalAmount +
+                      ((selectedCategory!['salesTaxApplicable'] ?? false)
+                          ? _originalAmount *
+                              ((selectedCategory!['salesTaxPercentage'] ??
+                                      0.0) /
+                                  100)
+                          : 0.0),
                 };
-
                 // Save transaction data to Firestore
                 await FirebaseFirestore.instance
                     .collection('transactions')
@@ -269,11 +287,9 @@ class _AddExpensePageState extends State<AddExpensePage>
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? '';
 
-    // Query Firestore for categories that match the user's email
-    final snapshot = await FirebaseFirestore.instance
-        .collection('categories')
-        .where('email', isEqualTo: email)
-        .get();
+    // Query Firestore for categories - now supporting both user-specific and global categories
+    final snapshot =
+        await FirebaseFirestore.instance.collection('categories').get();
 
     setState(() {
       categories = snapshot.docs.map((doc) {
@@ -282,6 +298,12 @@ class _AddExpensePageState extends State<AddExpensePage>
           "iconName": doc['iconName'],
           "name": doc['name'],
           "iconColor": doc['iconColor'],
+          "salesTaxApplicable": doc.data().containsKey('salesTaxApplicable')
+              ? doc['salesTaxApplicable']
+              : false,
+          "salesTaxPercentage": doc.data().containsKey('salesTaxPercentage')
+              ? doc['salesTaxPercentage']
+              : 0.0,
         };
       }).toList();
     });
