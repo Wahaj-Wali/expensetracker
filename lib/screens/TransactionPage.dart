@@ -7,6 +7,7 @@ import 'package:intl/intl.dart'; // For date formatting
 import 'package:modal_bottom_sheet/modal_bottom_sheet.dart';
 import 'package:ExpenseTracker/screens/DetailTransactionPage.dart';
 import 'package:ExpenseTracker/widgets/CustomBottomNavigationBar.dart';
+import 'package:ExpenseTracker/Services/SalesTaxController.dart'; // Import the SalesTaxController
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Custom Filter Modal as a Widget
@@ -258,7 +259,7 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
   }
 }
 
-// Transaction model
+// Enhanced Transaction model with sales tax
 class Transaction {
   final String title;
   final String description;
@@ -267,7 +268,9 @@ class Transaction {
   final String transactionType;
   final IconData icon;
   final String id;
-  final DateTime date; // New field to store transaction date
+  final DateTime date;
+  final double salesTax; // New field for sales tax
+  final String categoryName; // New field for category name
 
   Transaction({
     required this.title,
@@ -277,7 +280,9 @@ class Transaction {
     required this.transactionType,
     required this.icon,
     required this.id,
-    required this.date, // Transaction date
+    required this.date,
+    required this.salesTax,
+    required this.categoryName,
   });
 }
 
@@ -338,12 +343,15 @@ class _TransactionpageState extends State<Transactionpage> {
   };
 
   String id = "";
+  late SalesTaxController
+      _salesTaxController; // Add SalesTaxController instance
 
   late Future<List<Transaction>> _transactionListFuture;
 
   @override
   void initState() {
     super.initState();
+    _salesTaxController = SalesTaxController(); // Initialize the controller
 
     // Apply initial filter if provided
     if (widget.initialFilter != null) {
@@ -428,19 +436,30 @@ class _TransactionpageState extends State<Transactionpage> {
       String title;
       Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
 
-      if (data == null)
-        continue;
-      else {
-        title = data.containsKey('category_name')
-            ? data['category_name']
-            : 'No Category';
-      }
+      if (data == null) continue;
+
+      title = data.containsKey('category_name')
+          ? data['category_name']
+          : 'No Category';
 
       String description = data['description'];
       id = data['transaction_id'];
+      String categoryName = data['category_name'] ?? 'No Category';
+
+      // Parse amount as double for calculation
+      double amountValue = data['amount'] is String
+          ? double.tryParse(data['amount']) ?? 0.0
+          : data['amount'].toDouble();
+
+      // Calculate sales tax using the controller
+      double salesTax = 0.0;
+      if (data['transaction_type'] == 'Expense') {
+        salesTax = _salesTaxController.calculateSalesTaxForTransaction(
+            categoryName, amountValue);
+      }
 
       String amount =
-          '${data['transaction_type'] == "Income" ? "+" : data['transaction_type'] == "Expense" ? "-" : "±"} Rs${data['amount']}';
+          '${data['transaction_type'] == "Income" ? "+" : data['transaction_type'] == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
       String transactionType = data['transaction_type'];
       DateTime date = (data['timestamp'] as Timestamp).toDate();
       String time = DateFormat('hh:mm a').format(date);
@@ -471,6 +490,8 @@ class _TransactionpageState extends State<Transactionpage> {
         icon: icon,
         id: id,
         date: date,
+        salesTax: salesTax,
+        categoryName: categoryName,
       ));
     }
 
@@ -836,7 +857,11 @@ class _TransactionpageState extends State<Transactionpage> {
   }
 
   // Updated transaction item to match BudgetPage styling
+  // Updated transaction item with sales tax display
   Widget _buildTransactionItem(BuildContext context, Transaction transaction) {
+    bool isTaxableExpense =
+        transaction.transactionType == "Expense" && transaction.salesTax > 0;
+
     return GestureDetector(
       onTap: () {
         if (transaction.id.isNotEmpty) {
@@ -865,80 +890,96 @@ class _TransactionpageState extends State<Transactionpage> {
               ),
             ],
           ),
-          child: Row(
+          child: Column(
             children: [
-              // Icon section
-              Container(
-                height: 55,
-                width: 55,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: transaction.transactionType == "Income"
-                      ? const Color.fromRGBO(0, 168, 107, 1).withOpacity(0.1)
-                      : transaction.transactionType == "Expense"
-                          ? const Color.fromRGBO(253, 60, 74, 1)
-                              .withOpacity(0.1)
-                          : const Color.fromRGBO(0, 119, 255, 1)
-                              .withOpacity(0.1),
-                ),
-                child: Icon(
-                  transaction.icon,
-                  color: transaction.transactionType == "Income"
-                      ? const Color.fromRGBO(0, 168, 107, 1)
-                      : transaction.transactionType == "Expense"
-                          ? const Color.fromRGBO(253, 60, 74, 1)
-                          : const Color.fromRGBO(0, 119, 255, 1),
-                  size: 30,
-                ),
-              ),
-              const SizedBox(width: 15),
-              // Title and description
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      transaction.title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        color: Colors.black,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      transaction.description,
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Amount and time
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              Row(
                 children: [
-                  Text(
-                    transaction.amount,
-                    style: TextStyle(
+                  // Icon section
+                  Container(
+                    height: 55,
+                    width: 55,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: transaction.transactionType == "Income"
+                          ? const Color.fromRGBO(0, 168, 107, 1)
+                              .withOpacity(0.1)
+                          : transaction.transactionType == "Expense"
+                              ? const Color.fromRGBO(253, 60, 74, 1)
+                                  .withOpacity(0.1)
+                              : const Color.fromRGBO(0, 119, 255, 1)
+                                  .withOpacity(0.1),
+                    ),
+                    child: Icon(
+                      transaction.icon,
                       color: transaction.transactionType == "Income"
                           ? const Color.fromRGBO(0, 168, 107, 1)
                           : transaction.transactionType == "Expense"
                               ? const Color.fromRGBO(253, 60, 74, 1)
                               : const Color.fromRGBO(0, 119, 255, 1),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                      size: 30,
                     ),
                   ),
-                  const SizedBox(height: 5),
-                  Text(
-                    transaction.time,
-                    style: TextStyle(
-                      color: Colors.grey[500],
-                      fontSize: 12,
+                  const SizedBox(width: 15),
+                  // Title and description
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          transaction.title,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Colors.black,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          transaction.description,
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                        if (isTaxableExpense) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            'Sales Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
+                  ),
+                  // Amount and time
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        transaction.amount,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: transaction.transactionType == "Income"
+                              ? const Color.fromRGBO(0, 168, 107, 1)
+                              : transaction.transactionType == "Expense"
+                                  ? const Color.fromRGBO(253, 60, 74, 1)
+                                  : const Color.fromRGBO(0, 119, 255, 1),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        transaction.time,
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -949,19 +990,20 @@ class _TransactionpageState extends State<Transactionpage> {
     );
   }
 
-  // Helper function to format the transaction date
   String _formatTransactionDate(DateTime date) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = DateTime(now.year, now.month, now.day - 1);
-    final transactionDate = DateTime(date.year, date.month, date.day);
+    DateTime now = DateTime.now();
+    DateTime yesterday = now.subtract(const Duration(days: 1));
 
-    if (transactionDate == today) {
+    if (date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day) {
       return 'Today';
-    } else if (transactionDate == yesterday) {
+    } else if (date.year == yesterday.year &&
+        date.month == yesterday.month &&
+        date.day == yesterday.day) {
       return 'Yesterday';
     } else {
-      return DateFormat('d MMM y').format(date);
+      return DateFormat('MMMM d, y').format(date);
     }
   }
 }

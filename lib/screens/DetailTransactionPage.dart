@@ -1,7 +1,9 @@
+import 'package:ExpenseTracker/Services/TransactionController.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+// Update with your actual path
 
 class DetailTransactionPage extends StatefulWidget {
   final String transactionId;
@@ -18,6 +20,7 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
   bool _hasError = false;
   String _errorMessage = '';
   Map<String, dynamic>? transactionData;
+  final TransactionController _transactionController = TransactionController();
 
   @override
   void initState() {
@@ -59,6 +62,64 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
         _hasError = true;
         _errorMessage = e.toString();
       });
+    }
+  }
+
+  Future<void> _deleteTransaction() async {
+    try {
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('Deleting transaction...'),
+            ],
+          ),
+        ),
+      );
+
+      // Call the delete function from TransactionController
+      final result = await _transactionController.deleteTransaction(
+        transactionId: widget.transactionId,
+      );
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      if (result['success']) {
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message']),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Go back to previous screen
+        Navigator.pop(context, true); // Pass true to indicate deletion occurred
+      } else {
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message']),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if it's still open
+      Navigator.pop(context);
+
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete transaction: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -260,13 +321,8 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
               ),
               TextButton(
                 onPressed: () {
-                  // Implement delete functionality
-                  Navigator.pop(context); // Close dialog
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content:
-                            Text('Delete functionality to be implemented')),
-                  );
+                  Navigator.pop(context); // Close confirmation dialog
+                  _deleteTransaction(); // Call the actual delete function
                 },
                 child:
                     const Text('DELETE', style: TextStyle(color: Colors.red)),
@@ -316,7 +372,7 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
             ),
             TransactionDetailItem(
               icon: Icons.account_balance_wallet,
-              label: "Account",
+              label: "Source",
               value: transactionData![accountFieldName] ?? "N/A",
             ),
             TransactionDetailItem(

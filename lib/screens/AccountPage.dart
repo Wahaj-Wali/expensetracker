@@ -5,9 +5,6 @@ import 'package:ExpenseTracker/screens/AddAccountPage.dart';
 import 'package:ExpenseTracker/widgets/custom_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../widgets/CircularMenuWidget.dart';
-import '../widgets/CustomBottomNavigationBar.dart';
-
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
 
