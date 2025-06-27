@@ -1,7 +1,7 @@
+import 'package:ExpenseTracker/screens/EditCategoryScreen.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore package
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ExpenseTracker/screens/AddCategoryPage.dart';
-
 import 'package:shared_preferences/shared_preferences.dart';
 
 class CategoriesPage extends StatefulWidget {
@@ -17,90 +17,34 @@ class _CategoriesPageState extends State<CategoriesPage> {
   @override
   void initState() {
     super.initState();
-    initializeDefaultCategories();
     fetchCategories();
-  }
-
-  // Function to create default categories for new users
-  Future<void> initializeDefaultCategories() async {
-    try {
-      // Check if any default categories exist (not user-specific anymore)
-      QuerySnapshot defaultCategories = await FirebaseFirestore.instance
-          .collection('categories')
-          .where('isDefault', isEqualTo: true)
-          .get();
-
-      // If no default categories exist, create them
-      if (defaultCategories.docs.isEmpty) {
-        await createDefaultCategories();
-      }
-    } catch (e) {
-      print("Error initializing default categories: $e");
-    }
-  }
-
-  // Function to create default categories
-  // 1. Fix initializeDefaultCategories() method:
-
-// 2. Fix createDefaultCategories() method:
-  Future<void> createDefaultCategories() async {
-    final defaultCategories = [
-      {
-        'iconName': 'Restaurant',
-        'name': 'Food & Drinks',
-        'iconColor': '#FF6B6B'
-      },
-      {'iconName': 'Car', 'name': 'Transportation', 'iconColor': '#4ECDC4'},
-      {'iconName': 'Groceries', 'name': 'Shopping', 'iconColor': '#45B7D1'},
-      {'iconName': 'Movie', 'name': 'Entertainment', 'iconColor': '#96CEB4'},
-      {'iconName': 'Hospital', 'name': 'Health', 'iconColor': '#FFEAA7'},
-      {'iconName': 'Rent', 'name': 'Housing', 'iconColor': '#DDA0DD'},
-      {'iconName': 'Plumbing', 'name': 'Utilities', 'iconColor': '#98D8C8'},
-      {'iconName': 'Gym', 'name': 'Fitness', 'iconColor': '#F7DC6F'},
-    ];
-
-    WriteBatch batch = FirebaseFirestore.instance.batch();
-
-    for (var category in defaultCategories) {
-      DocumentReference docRef =
-          FirebaseFirestore.instance.collection('categories').doc();
-      batch.set(docRef, {
-        'iconName': category['iconName'],
-        'name': category['name'],
-        'iconColor': category['iconColor'],
-        // 'email': email, // REMOVED - no longer user-specific
-        'isDefault': true, // Mark as default category
-        'salesTaxApplicable': true,
-        'salesTaxPercentage': 18.0,
-        'salesTaxRate': 0.18,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-    }
-
-    await batch.commit();
   }
 
   // Function to fetch categories from Firestore
   Future<void> fetchCategories() async {
     try {
-      // Fetch ALL categories from Firestore (no email filtering)
       QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection('categories')
-          .orderBy('createdAt',
-              descending: false) // Optional: order by creation date
+          .orderBy('createdAt', descending: false)
           .get();
 
       List<Map<String, dynamic>> categories = snapshot.docs.map((doc) {
         return {
-          "id": doc.id, // Store document ID for deletion
-          "iconName":
-              doc['iconName'], // The name of the icon stored in Firestore
-          "name": doc['name'], // The name of the category
-          "iconColor":
-              doc['iconColor'], // Assuming the color is stored as a hex string
+          "id": doc.id,
+          "iconName": doc['iconName'],
+          "name": doc['name'],
+          "iconColor": doc['iconColor'],
           "isDefault": doc.data().toString().contains('isDefault')
               ? doc['isDefault']
               : false,
+          "salesTaxApplicable":
+              doc.data().toString().contains('salesTaxApplicable')
+                  ? doc['salesTaxApplicable']
+                  : true,
+          "salesTaxPercentage":
+              doc.data().toString().contains('salesTaxPercentage')
+                  ? doc['salesTaxPercentage']
+                  : 18.0,
         };
       }).toList();
 
@@ -116,41 +60,32 @@ class _CategoriesPageState extends State<CategoriesPage> {
   Future<void> deleteCategory(
       String categoryId, String categoryName, bool isDefault) async {
     try {
-      // Get user email from SharedPreferences (still needed for transactions)
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? email = prefs.getString('email');
 
-      // Start a batch write
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
-      // Reference to the category document
       DocumentReference categoryRef =
           FirebaseFirestore.instance.collection('categories').doc(categoryId);
 
-      // Delete the category
       batch.delete(categoryRef);
 
-      // Get all related transactions (transactions are still user-specific)
       QuerySnapshot transactionsSnapshot = await FirebaseFirestore.instance
           .collection('transactions')
           .where('email', isEqualTo: email)
           .where('category_name', isEqualTo: categoryName)
           .get();
 
-      // Add delete operations for all related transactions to the batch
       for (var doc in transactionsSnapshot.docs) {
         batch.delete(doc.reference);
       }
 
-      // Commit the batch
       await batch.commit();
 
-      // Update the UI
       setState(() {
         _categoryItems.removeWhere((item) => item['id'] == categoryId);
       });
 
-      // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -179,43 +114,150 @@ class _CategoriesPageState extends State<CategoriesPage> {
     'Fastfood': Icons.fastfood,
     'Cafe': Icons.local_cafe,
     'Cake': Icons.cake,
-
-    // Transportation
     'Car': Icons.directions_car,
     'Bus': Icons.directions_bus,
     'Bike': Icons.directions_bike,
     'Taxi': Icons.local_taxi,
-
-    // Utilities
     'Plumbing': Icons.plumbing,
-
-    // Entertainment
     'Movie': Icons.movie,
     'M': Icons.music_note,
     'Games': Icons.sports_esports,
     'Ticket': Icons.local_movies,
-
-    // Shopping
     'Groceries': Icons.shopping_cart,
     'Clothing': Icons.local_mall,
-
-    // Health and Fitness
     'Gym': Icons.fitness_center,
     'Hospital': Icons.local_hospital,
     'Pharmacy': Icons.local_pharmacy,
     'FirstAid': Icons.healing,
-
-    // Home and Rent
     'Rent': Icons.home,
     'Apartment': Icons.apartment,
     'Kitchen': Icons.kitchen,
     'Furniture': Icons.weekend,
-    // Add more icons as needed
   };
 
-  // Icon mapping function to get IconData based on icon name
   IconData? getIconData(String iconName) {
     return _flutterIcons[iconName];
+  }
+
+  // Show edit/delete options dialog
+  void _showCategoryOptionsDialog(Map<String, dynamic> category) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          title: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Color(int.parse(
+                          category['iconColor'].replaceFirst('#', '0xFF')))
+                      .withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  getIconData(category['iconName']),
+                  color: Color(int.parse(
+                      category['iconColor'].replaceFirst('#', '0xFF'))),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  category['name'],
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (category['isDefault'] == true)
+                Container(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'This is a default category',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Text(
+                'Tax: ${category['salesTaxApplicable'] == true ? '${category['salesTaxPercentage']}%' : 'Exempt'}',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'What would you like to do?',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('Edit'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _editCategory(category);
+              },
+            ),
+            TextButton(
+              child: const Text(
+                'Delete',
+                style: TextStyle(color: Colors.red),
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showDeleteConfirmationDialog(
+                  category['id'],
+                  category['name'],
+                  category['isDefault'] ?? false,
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Navigate to edit category page
+  void _editCategory(Map<String, dynamic> category) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditCategoryPage(category: category),
+      ),
+    ).then((_) => fetchCategories());
   }
 
   // Show delete confirmation dialog
@@ -280,6 +322,45 @@ class _CategoriesPageState extends State<CategoriesPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Show message if no categories exist
+          if (_categoryItems.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.category_outlined,
+                    size: 48,
+                    color: Colors.grey[400],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No Categories Yet',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Create your first category to start organizing your expenses',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Categories List
           ..._categoryItems
               .map((item) => Container(
@@ -289,11 +370,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.grey
-                              .withOpacity(0.2), // Lighter shadow color
-                          spreadRadius: 3, // Increased spread radius
-                          blurRadius: 12, // Increased blur radius
-                          offset: const Offset(0, 6), // Slight offset for depth
+                          color: Colors.grey.withOpacity(0.2),
+                          spreadRadius: 3,
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
                         ),
                       ],
                     ),
@@ -316,11 +396,13 @@ class _CategoriesPageState extends State<CategoriesPage> {
                       ),
                       title: Row(
                         children: [
-                          Text(
-                            item['name'],
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                          Expanded(
+                            child: Text(
+                              item['name'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
                             ),
                           ),
                           if (item['isDefault'] == true)
@@ -343,18 +425,18 @@ class _CategoriesPageState extends State<CategoriesPage> {
                             ),
                         ],
                       ),
-                      trailing: IconButton(
-                        icon: Icon(
-                          item['isDefault'] == true
-                              ? Icons.lock_outline
-                              : Icons.delete_outline,
-                          color: item['isDefault'] == true ? Colors.grey : null,
+                      subtitle: Text(
+                        'Tax: ${item['salesTaxApplicable'] == true ? '${item['salesTaxPercentage']}%' : 'Exempt'}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
                         ),
-                        onPressed: () => _showDeleteConfirmationDialog(
-                            item['id'],
-                            item['name'],
-                            item['isDefault'] ?? false),
                       ),
+                      trailing: const Icon(
+                        Icons.more_vert,
+                        color: Colors.grey,
+                      ),
+                      onTap: () => _showCategoryOptionsDialog(item),
                     ),
                   ))
               .toList(),
@@ -367,10 +449,10 @@ class _CategoriesPageState extends State<CategoriesPage> {
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.2), // Lighter shadow color
-                  spreadRadius: 3, // Increased spread radius
-                  blurRadius: 12, // Increased blur radius
-                  offset: const Offset(0, 6), // Slight offset for depth
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 3,
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
