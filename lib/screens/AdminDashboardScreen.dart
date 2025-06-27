@@ -1,6 +1,10 @@
 import 'package:ExpenseTracker/Services/AdminService.dart';
+import 'package:ExpenseTracker/screens/CategoriesPage.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:ExpenseTracker/Services/auth_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'LoginPage.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -9,15 +13,25 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
+class _AdminDashboardState extends State<AdminDashboard>
+    with SingleTickerProviderStateMixin {
   final AdminStatsService _adminStatsService = AdminStatsService();
   Map<String, dynamic> dashboardData = {};
   bool isLoading = true;
+  late TabController _tabController;
+  final AuthService _authService = AuthService();
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadDashboardData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDashboardData() async {
@@ -41,52 +55,80 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _signOut() async {
+    await _authService.signout();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.white, // Match Transactionpage
       appBar: AppBar(
-        title: const Text('Admin Dashboard'),
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text(
+          'Admin Dashboard',
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.black,
+          indicatorColor: const Color.fromRGBO(127, 61, 255, 1),
+          tabs: const [
+            Tab(text: 'Statistics'),
+            Tab(text: 'Categories'),
+          ],
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadDashboardData,
+            icon: const Icon(Icons.logout, color: Colors.black),
+            tooltip: 'Sign Out',
+            onPressed: _signOut,
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadDashboardData,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Stats Overview Cards
-                    _buildStatsOverview(),
-                    const SizedBox(height: 24),
-
-                    // Charts Section
-                    _buildChartsSection(),
-                    const SizedBox(height: 24),
-
-                    // Top Users Section
-                    _buildTopUsersSection(),
-                    const SizedBox(height: 24),
-
-                    // Sales Tax Section
-                    _buildSalesTaxSection(),
-                    const SizedBox(height: 24),
-
-                    // User Registration Trends
-                    _buildRegistrationTrendsSection(),
-                  ],
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // Statistics Tab
+          isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _loadDashboardData,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildStatsOverview(),
+                        const SizedBox(height: 24),
+                        _buildChartsSection(),
+                        const SizedBox(height: 24),
+                        _buildTopUsersSection(),
+                        const SizedBox(height: 24),
+                        _buildSalesTaxSection(),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
+          // Categories Tab
+          const CategoriesPage(),
+        ],
+      ),
     );
   }
 
@@ -96,56 +138,60 @@ class _AdminDashboardState extends State<AdminDashboard> {
       children: [
         const Text(
           'Overview',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Colors.black, // Match Transactionpage
+          ),
         ),
         const SizedBox(height: 16),
         GridView.count(
           crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           childAspectRatio: 1.4,
           crossAxisSpacing: 16,
           mainAxisSpacing: 16,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
           children: [
             _buildStatCard(
               title: 'Total Users',
               value: '${dashboardData['totalUsers'] ?? 0}',
               icon: Icons.people,
-              color: Colors.blue,
+              color: const Color.fromRGBO(127, 61, 255, 1),
             ),
             _buildStatCard(
               title: 'Active Users',
               value: '${dashboardData['activeUsers'] ?? 0}',
               icon: Icons.people_alt,
-              color: Colors.green,
+              color: const Color.fromRGBO(0, 168, 107, 1),
             ),
             _buildStatCard(
               title: 'Total Transactions',
               value: '${dashboardData['totalTransactions'] ?? 0}',
               icon: Icons.receipt_long,
-              color: Colors.orange,
+              color: const Color.fromRGBO(253, 60, 74, 1),
+            ),
+            // Switch Net Balance and Total Expenses
+            _buildStatCard(
+              title: 'Net Balance',
+              value:
+                  'PKR ${_formatAmount((dashboardData['totalIncome'] ?? 0.0) - (dashboardData['totalExpenses'] ?? 0.0))}',
+              icon: Icons.account_balance_wallet,
+              color: const Color.fromRGBO(127, 61, 255, 1),
             ),
             _buildStatCard(
               title: 'Total Expenses',
               value:
                   'PKR ${_formatAmount(dashboardData['totalExpenses'] ?? 0.0)}',
               icon: Icons.arrow_downward,
-              color: Colors.red,
+              color: const Color.fromRGBO(253, 60, 74, 1),
             ),
             _buildStatCard(
               title: 'Total Income',
               value:
                   'PKR ${_formatAmount(dashboardData['totalIncome'] ?? 0.0)}',
               icon: Icons.arrow_upward,
-              color: Colors.green,
-            ),
-            _buildStatCard(
-              title: 'Net Balance',
-              value:
-                  'PKR ${_formatAmount((dashboardData['totalIncome'] ?? 0.0) - (dashboardData['totalExpenses'] ?? 0.0))}',
-              icon: Icons.account_balance_wallet,
-              color: Colors.purple,
+              color: const Color.fromRGBO(0, 168, 107, 1),
             ),
           ],
         ),
@@ -163,39 +209,51 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
         children: [
-          Icon(icon, size: 32, color: color),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.grey,
-              fontWeight: FontWeight.w500,
+          Container(
+            height: 45,
+            width: 45,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: color.withOpacity(0.1),
             ),
-            textAlign: TextAlign.center,
+            child: Icon(icon, size: 28, color: color),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: color,
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
             ),
-            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -208,48 +266,63 @@ class _AdminDashboardState extends State<AdminDashboard> {
       children: [
         const Text(
           'Analytics',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
         ),
         const SizedBox(height: 16),
-
-        // Category Expenses Pie Chart
-        _buildCategoryExpensesChart(),
+        _buildCategorySalesTaxChart(), // changed from _buildCategoryExpensesChart
         const SizedBox(height: 24),
-
-        // Monthly Trends Line Chart
         _buildMonthlyTrendsChart(),
         const SizedBox(height: 24),
-
-        // Account Types Distribution
         _buildAccountTypesChart(),
       ],
     );
   }
 
-  Widget _buildCategoryExpensesChart() {
-    final categoryExpenses =
-        dashboardData['categoryExpenses'] as Map<String, double>? ?? {};
+  // Replace _buildCategoryExpensesChart with this new chart
+  Widget _buildCategorySalesTaxChart() {
+    final salesTaxStats =
+        dashboardData['salesTaxStats'] as Map<String, dynamic>? ?? {};
+    final categoryTaxes =
+        salesTaxStats['categoryTaxes'] as Map<String, double>? ?? {};
 
-    if (categoryExpenses.isEmpty) {
-      return _buildEmptyChart('No category data available');
+    if (categoryTaxes.isEmpty) {
+      return _buildEmptyChart('No sales tax data available');
     }
 
-    // Get top 8 categories
-    final sortedCategories = categoryExpenses.entries.toList()
+    // Get top 8 categories by tax
+    final sortedCategories = categoryTaxes.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     final topCategories = sortedCategories.take(8).toList();
+
+    // Use pastel colors for the pie chart
+    final colors = [
+      const Color(0xFFB5B9FF), // pastel blue
+      const Color(0xFFFFB5E2), // pastel pink
+      const Color(0xFFB5FFD9), // pastel green
+      const Color(0xFFFFF5B5), // pastel yellow
+      const Color(0xFFFFD6B5), // pastel orange
+      const Color(0xFFFFB5B5), // pastel red
+      const Color(0xFFCBB5FF), // pastel purple
+      const Color(0xFFB5FFF6), // pastel teal
+    ];
+
+    final totalTax = categoryTaxes.values.fold(0.0, (a, b) => a + b);
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -257,34 +330,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Category-wise Expenses',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            'Category-wise Sales Tax Distribution',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
           ),
           const SizedBox(height: 16),
           SizedBox(
-            height: 300,
+            height: 220,
             child: PieChart(
               PieChartData(
                 sections: topCategories.asMap().entries.map((entry) {
                   final index = entry.key;
                   final category = entry.value;
-                  final colors = [
-                    Colors.blue,
-                    Colors.red,
-                    Colors.green,
-                    Colors.orange,
-                    Colors.purple,
-                    Colors.teal,
-                    Colors.pink,
-                    Colors.indigo,
-                  ];
-
                   return PieChartSectionData(
                     color: colors[index % colors.length],
                     value: category.value,
-                    title:
-                        '${((category.value / categoryExpenses.values.reduce((a, b) => a + b)) * 100).toStringAsFixed(1)}%',
-                    radius: 100,
+                    title: totalTax > 0
+                        ? '${((category.value / totalTax) * 100).toStringAsFixed(1)}%'
+                        : '0%',
+                    radius: 70,
                     titleStyle: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -292,7 +359,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                   );
                 }).toList(),
-                centerSpaceRadius: 40,
+                centerSpaceRadius: 30,
                 sectionsSpace: 2,
               ),
             ),
@@ -304,29 +371,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
             children: topCategories.asMap().entries.map((entry) {
               final index = entry.key;
               final category = entry.value;
-              final colors = [
-                Colors.blue,
-                Colors.red,
-                Colors.green,
-                Colors.orange,
-                Colors.purple,
-                Colors.teal,
-                Colors.pink,
-                Colors.indigo,
-              ];
-
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: 12,
                     height: 12,
-                    color: colors[index % colors.length],
+                    decoration: BoxDecoration(
+                      color: colors[index % colors.length],
+                      borderRadius: BorderRadius.circular(3),
+                    ),
                   ),
                   const SizedBox(width: 4),
                   Text(
                     category.key,
-                    style: const TextStyle(fontSize: 12),
+                    style: const TextStyle(fontSize: 12, color: Colors.black87),
                   ),
                 ],
               );
@@ -349,13 +408,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -364,11 +423,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           const Text(
             'Monthly Transaction Trends',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
           ),
           const SizedBox(height: 16),
           SizedBox(
-            height: 300,
+            height: 200,
             child: LineChart(
               LineChartData(
                 gridData: FlGridData(show: true),
@@ -380,7 +443,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       getTitlesWidget: (value, meta) {
                         return Text(
                           _formatAmount(value),
-                          style: const TextStyle(fontSize: 10),
+                          style: const TextStyle(
+                              fontSize: 10, color: Colors.black87),
                         );
                       },
                     ),
@@ -395,7 +459,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           final month = monthlyTrends[index]['month'];
                           return Text(
                             month.split('-')[1],
-                            style: const TextStyle(fontSize: 10),
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.black87),
                           );
                         }
                         return const Text('');
@@ -415,7 +480,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           entry.value['expense'].toDouble());
                     }).toList(),
                     isCurved: true,
-                    color: Colors.red,
+                    color: const Color.fromRGBO(253, 60, 74, 1),
                     barWidth: 3,
                     belowBarData: BarAreaData(show: false),
                   ),
@@ -425,7 +490,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           entry.value['income'].toDouble());
                     }).toList(),
                     isCurved: true,
-                    color: Colors.green,
+                    color: const Color.fromRGBO(0, 168, 107, 1),
                     barWidth: 3,
                     belowBarData: BarAreaData(show: false),
                   ),
@@ -436,13 +501,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 16),
           Row(
             children: [
-              Container(width: 12, height: 12, color: Colors.red),
+              Container(
+                  width: 12,
+                  height: 12,
+                  color: const Color.fromRGBO(253, 60, 74, 1)),
               const SizedBox(width: 8),
-              const Text('Expenses'),
+              const Text('Expenses', style: TextStyle(color: Colors.black87)),
               const SizedBox(width: 24),
-              Container(width: 12, height: 12, color: Colors.green),
+              Container(
+                  width: 12,
+                  height: 12,
+                  color: const Color.fromRGBO(0, 168, 107, 1)),
               const SizedBox(width: 8),
-              const Text('Income'),
+              const Text('Income', style: TextStyle(color: Colors.black87)),
             ],
           ),
         ],
@@ -462,13 +533,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -477,11 +548,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           const Text(
             'Account Types Distribution',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
           ),
           const SizedBox(height: 16),
           SizedBox(
-            height: 200,
+            height: 150,
             child: BarChart(
               BarChartData(
                 alignment: BarChartAlignment.spaceAround,
@@ -503,7 +578,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
                               types[index],
-                              style: const TextStyle(fontSize: 10),
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.black87),
                               textAlign: TextAlign.center,
                             ),
                           );
@@ -516,6 +592,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 40,
+                      getTitlesWidget: (value, meta) => Text(
+                        value.toInt().toString(),
+                        style: const TextStyle(
+                            color: Colors.black87, fontSize: 10),
+                      ),
                     ),
                   ),
                   rightTitles:
@@ -534,7 +615,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     barRods: [
                       BarChartRodData(
                         toY: type.value.toDouble(),
-                        color: Colors.indigo,
+                        color: const Color.fromRGBO(127, 61, 255, 1),
                         width: 20,
                         borderRadius: BorderRadius.circular(4),
                       ),
@@ -557,13 +638,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -572,7 +653,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           const Text(
             'Top Spending Users',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
           ),
           const SizedBox(height: 16),
           if (topUsers.isEmpty)
@@ -589,24 +674,42 @@ class _AdminDashboardState extends State<AdminDashboard> {
               itemCount: topUsers.length,
               itemBuilder: (context, index) {
                 final user = topUsers[index];
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.indigo,
-                    child: Text(
-                      '${index + 1}',
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10.0),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.08),
+                          spreadRadius: 1,
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
-                  ),
-                  title: Text(
-                    user['email'],
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  trailing: Text(
-                    'PKR ${_formatAmount(user['totalExpense'])}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
+                        child: Text(
+                          '${index + 1}',
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      title: Text(
+                        user['email'],
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w500, color: Colors.black),
+                      ),
+                      trailing: Text(
+                        'PKR ${_formatAmount(user['totalExpense'])}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color.fromRGBO(253, 60, 74, 1),
+                        ),
+                      ),
                     ),
                   ),
                 );
@@ -625,13 +728,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -640,7 +743,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           const Text(
             'Sales Tax Statistics',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
           ),
           const SizedBox(height: 16),
           Row(
@@ -650,7 +757,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   title: 'Total Taxable Amount',
                   value:
                       'PKR ${_formatAmount(salesTaxStats['totalTaxableAmount'] ?? 0.0)}',
-                  color: Colors.blue,
+                  color: const Color.fromRGBO(127, 61, 255, 1),
                 ),
               ),
               const SizedBox(width: 16),
@@ -659,22 +766,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   title: 'Total Tax Amount',
                   value:
                       'PKR ${_formatAmount(salesTaxStats['totalTaxAmount'] ?? 0.0)}',
-                  color: Colors.orange,
+                  color: const Color.fromRGBO(253, 60, 74, 1),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          _buildTaxStatCard(
-            title: 'Average Tax Rate',
-            value:
-                '${(salesTaxStats['averageTaxRate'] ?? 0.0).toStringAsFixed(2)}%',
-            color: Colors.purple,
-          ),
-          const SizedBox(height: 16),
           const Text(
             'Category-wise Tax Breakdown',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black),
           ),
           const SizedBox(height: 8),
           ...((salesTaxStats['categoryTaxes'] as Map<String, double>? ?? {}))
@@ -685,10 +786,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(entry.key),
+                        Text(entry.key,
+                            style: const TextStyle(color: Colors.black87)),
                         Text(
                           'PKR ${_formatAmount(entry.value)}',
-                          style: const TextStyle(fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w500, color: Colors.black),
                         ),
                       ],
                     ),
@@ -707,9 +810,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -736,122 +839,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildRegistrationTrendsSection() {
-    final registrationTrends =
-        dashboardData['registrationTrends'] as List<Map<String, dynamic>>? ??
-            [];
-
-    if (registrationTrends.isEmpty) {
-      return _buildEmptyChart('No registration trends data available');
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'User Registration Trends',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 250,
-            child: BarChart(
-              BarChartData(
-                alignment: BarChartAlignment.spaceAround,
-                maxY: registrationTrends
-                        .map((e) => e['registrations'] as int)
-                        .reduce((a, b) => a > b ? a : b)
-                        .toDouble() *
-                    1.2,
-                barTouchData: BarTouchData(enabled: false),
-                titlesData: FlTitlesData(
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 40,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index >= 0 && index < registrationTrends.length) {
-                          final month = registrationTrends[index]['month'];
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              month.split('-')[1],
-                              style: const TextStyle(fontSize: 10),
-                            ),
-                          );
-                        }
-                        return const Text('');
-                      },
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 40,
-                    ),
-                  ),
-                  rightTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  topTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                ),
-                borderData: FlBorderData(show: true),
-                barGroups: registrationTrends.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final trend = entry.value;
-
-                  return BarChartGroupData(
-                    x: index,
-                    barRods: [
-                      BarChartRodData(
-                        toY: trend['registrations'].toDouble(),
-                        color: Colors.teal,
-                        width: 20,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ],
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEmptyChart(String message) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 3,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
       child: SizedBox(
-        height: 200,
+        height: 120,
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
