@@ -40,6 +40,16 @@ class AuthService {
     }
   }
 
+  // Initialize global categories on app startup
+  Future<void> initializeApp() async {
+    try {
+      await DefaultCategoriesService.initializeGlobalCategories();
+      log("Global categories initialized successfully");
+    } catch (e) {
+      log("Error initializing global categories: $e");
+    }
+  }
+
   // Create user with email and password
   Future<Map<String, String>?> createUserWithEmailAndPassword(
       String name, String email, String password) async {
@@ -55,8 +65,9 @@ class AuthService {
         'is_tried': false,
       });
 
-      // Create default categories for the new user
-      await DefaultCategoriesService.createDefaultCategories(email);
+      // No longer creating default categories per user
+      // Global categories are available to all users automatically
+      log("User created successfully. Global categories are available.");
 
       // Return user data as a map
       return {'email': email, 'auth_id': authId};
@@ -211,8 +222,9 @@ class AuthService {
           'profile_img': photoURL, // Save profile image URL
         });
 
-        // Create default categories for the new user
-        await DefaultCategoriesService.createDefaultCategories(email);
+        // No longer creating default categories per user
+        // Global categories are available to all users automatically
+        log("New user created successfully. Global categories are available.");
 
         // Redirect to SetPassword screen
         WidgetsBinding.instance.addPostFrameCallback((_) {

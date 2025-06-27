@@ -4,63 +4,85 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SalesTaxController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Pakistani Sales Tax rates - 18% for applicable categories, 0% for exempt
-  final Map<String, double> _salesTaxRates = {
-    // Food & Beverages - 18% GST
-    'Restaurant': 0.18,
-    'Dining': 0.18,
-    'Fastfood': 0.18,
-    'Cafe': 0.18,
-    'Cake': 0.18,
-    'Groceries': 0.18,
+  Map<String, double> _cachedTaxRates = {};
+  DateTime? _lastCacheUpdate;
 
-    // Transportation - 18% GST
-    'Car': 0.18,
-    'Bus': 0.18,
-    'Bike': 0.18,
-    'Taxi': 0.18,
+  Future<Map<String, double>> _loadTaxRatesFromDatabase() async {
+    try {
+      final snapshot = await _firestore.collection('categories').get();
+      Map<String, double> taxRates = {};
 
-    // Utilities - 18% GST
-    'Plumbing': 0.18,
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final categoryName = data['name'] as String?;
+        final salesTaxApplicable = data['salesTaxApplicable'] as bool? ?? true;
+        final salesTaxRate = data['salesTaxRate'] as double? ?? 0.0;
 
-    // Entertainment - 18% GST
-    'Movie': 0.18,
-    'M': 0.18, // Music
-    'Games': 0.18,
-    'Ticket': 0.18,
+        if (categoryName != null) {
+          taxRates[categoryName] = salesTaxApplicable ? salesTaxRate : 0.0;
+        }
+      }
 
-    // Shopping - 18% GST
-    'Clothing': 0.18,
+      _cachedTaxRates = taxRates;
+      _lastCacheUpdate = DateTime.now();
+      return taxRates;
+    } catch (e) {
+      print("Error loading tax rates from database: $e");
+      return _getDefaultTaxRates();
+    }
+  }
 
-    // Health - 0% (Medical services are exempt)
-    'Hospital': 0.0,
-    'Pharmacy': 0.0,
-    'FirstAid': 0.0,
+  Future<Map<String, double>> _getTaxRates() async {
+    final now = DateTime.now();
 
-    // Fitness - 18% GST
-    'Gym': 0.18,
-
-    // Home & Rent - 0% (Rent is exempt)
-    'Rent': 0.0,
-    'Apartment': 0.0,
-    'Kitchen': 0.18, // Kitchen items/appliances
-    'Furniture': 0.18,
-  };
-
-  // Calculate sales tax for a single transaction
-  double calculateSalesTaxForTransaction(String categoryName, double amount) {
-    double taxRate = _salesTaxRates[categoryName] ?? 0.18; // Default 18% GST
-
-    // If tax rate is 0 (exempt category), return 0
-    if (taxRate == 0.0) {
-      return 0.0;
+    if (_lastCacheUpdate != null &&
+        now.difference(_lastCacheUpdate!).inMinutes < 5 &&
+        _cachedTaxRates.isNotEmpty) {
+      return _cachedTaxRates;
     }
 
-    // Calculate 18% of the expense amount
+    return await _loadTaxRatesFromDatabase();
+  }
+
+  Map<String, double> _getDefaultTaxRates() {
+    return {
+      'Restaurant': 0.18,
+      'Dining': 0.18,
+      'Fastfood': 0.18,
+      'Cafe': 0.18,
+      'Cake': 0.18,
+      'Groceries': 0.18,
+      'Car': 0.18,
+      'Bus': 0.18,
+      'Bike': 0.18,
+      'Taxi': 0.18,
+      'Plumbing': 0.18,
+      'Movie': 0.18,
+      'M': 0.18,
+      'Games': 0.18,
+      'Ticket': 0.18,
+      'Clothing': 0.18,
+      'Hospital': 0.0,
+      'Pharmacy': 0.0,
+      'FirstAid': 0.0,
+      'Gym': 0.18,
+      'Rent': 0.0,
+      'Apartment': 0.0,
+      'Kitchen': 0.18,
+      'Furniture': 0.18,
+    };
+  }
+
+  Future<double> calculateSalesTaxForTransaction(
+      String categoryName, double amount) async {
+    final taxRates = await _getTaxRates();
+    final taxRate = taxRates[categoryName] ?? 0.0;
+
+    if (taxRate == 0.0) return 0.0;
+
     return amount * taxRate;
   }
 
-  // Get all expense transactions for the current user within a date range
   Future<List<Map<String, dynamic>>> getExpenseTransactions({
     DateTime? startDate,
     DateTime? endDate,
@@ -104,7 +126,6 @@ class SalesTaxController {
     }
   }
 
-  // Calculate total sales tax for a specific period
   Future<Map<String, dynamic>> calculateTotalSalesTax({
     DateTime? startDate,
     DateTime? endDate,
@@ -114,6 +135,8 @@ class SalesTaxController {
         startDate: startDate,
         endDate: endDate,
       );
+
+      final taxRates = await _getTaxRates();
 
       double totalSalesTax = 0.0;
       double totalExpenseAmount = 0.0;
@@ -125,17 +148,13 @@ class SalesTaxController {
         final categoryName = transaction['category_name'] as String;
         final amount = transaction['amount'] as double;
 
-        final salesTax = calculateSalesTaxForTransaction(categoryName, amount);
+        final taxRate = taxRates[categoryName] ?? 0.0;
+        final salesTax = taxRate > 0 ? amount * taxRate : 0.0;
 
         totalSalesTax += salesTax;
         totalExpenseAmount += amount;
+        if (salesTax > 0) totalTaxableAmount += amount;
 
-        // Only add to taxable amount if tax is applied
-        if (salesTax > 0) {
-          totalTaxableAmount += amount;
-        }
-
-        // Category-wise breakdown
         categoryWiseTax[categoryName] =
             (categoryWiseTax[categoryName] ?? 0.0) + salesTax;
         categoryWiseAmount[categoryName] =
@@ -169,7 +188,6 @@ class SalesTaxController {
     }
   }
 
-  // Calculate yearly sales tax
   Future<Map<String, dynamic>> calculateYearlySalesTax([int? year]) async {
     final targetYear = year ?? DateTime.now().year;
     final startDate = DateTime(targetYear, 1, 1);
@@ -181,7 +199,6 @@ class SalesTaxController {
     );
   }
 
-  // Calculate monthly sales tax
   Future<Map<String, dynamic>> calculateMonthlySalesTax(
       [int? year, int? month]) async {
     final targetYear = year ?? DateTime.now().year;
@@ -195,34 +212,38 @@ class SalesTaxController {
     );
   }
 
-  // Get sales tax rate for a category
-  double getSalesTaxRate(String categoryName) {
-    return _salesTaxRates[categoryName] ?? 0.18; // Default 18% GST
+  Future<double> getSalesTaxRate(String categoryName) async {
+    final taxRates = await _getTaxRates();
+    return taxRates[categoryName] ?? 0.0;
   }
 
-  // Get all available tax rates
-  Map<String, double> getAllTaxRates() {
-    return Map.from(_salesTaxRates);
+  Future<Map<String, double>> getAllTaxRates() async {
+    return await _getTaxRates();
   }
 
-  // Check if a category is tax exempt
-  bool isCategoryTaxExempt(String categoryName) {
-    return (_salesTaxRates[categoryName] ?? 0.18) == 0.0;
+  Future<bool> isCategoryTaxExempt(String categoryName) async {
+    final taxRates = await _getTaxRates();
+    return (taxRates[categoryName] ?? 0.0) == 0.0;
   }
 
-  // Get list of tax exempt categories
-  List<String> getTaxExemptCategories() {
-    return _salesTaxRates.entries
+  Future<List<String>> getTaxExemptCategories() async {
+    final taxRates = await _getTaxRates();
+    return taxRates.entries
         .where((entry) => entry.value == 0.0)
         .map((entry) => entry.key)
         .toList();
   }
 
-  // Get list of taxable categories
-  List<String> getTaxableCategories() {
-    return _salesTaxRates.entries
+  Future<List<String>> getTaxableCategories() async {
+    final taxRates = await _getTaxRates();
+    return taxRates.entries
         .where((entry) => entry.value > 0.0)
         .map((entry) => entry.key)
         .toList();
+  }
+
+  void clearCache() {
+    _cachedTaxRates.clear();
+    _lastCacheUpdate = null;
   }
 }

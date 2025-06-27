@@ -58,22 +58,17 @@ class DefaultCategoriesService {
     },
   ];
 
-  /// Creates default categories for a new user
-  ///
-  /// [email] - The user's email address
-  /// Returns true if successful, false otherwise
-  static Future<bool> createDefaultCategories(String email) async {
+  /// Creates default categories as global categories (not user-specific)
+  /// This should be called once during app initialization or admin setup
+  static Future<bool> createGlobalDefaultCategories() async {
     try {
-      // Check if user already has categories
-      final existingCategories = await _firestore
-          .collection('categories')
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
+      // Check if global default categories already exist
+      final existingCategories =
+          await _firestore.collection('global_categories').limit(1).get();
 
-      // If user already has categories, don't create defaults
+      // If global categories already exist, don't create defaults
       if (existingCategories.docs.isNotEmpty) {
-        log("User $email already has categories, skipping default creation");
+        log("Global default categories already exist, skipping creation");
         return true;
       }
 
@@ -82,22 +77,87 @@ class DefaultCategoriesService {
 
       for (var category in _defaultCategories) {
         DocumentReference categoryRef =
-            _firestore.collection('categories').doc();
+            _firestore.collection('global_categories').doc();
         batch.set(categoryRef, {
           ...category,
-          'email': email,
           'created_at': FieldValue.serverTimestamp(),
           'is_default': true, // Mark as default category
         });
       }
 
       await batch.commit();
-      log("Successfully created ${_defaultCategories.length} default categories for user: $email");
+      log("Successfully created ${_defaultCategories.length} global default categories");
       return true;
     } catch (e) {
-      log("Error creating default categories for $email: $e");
+      log("Error creating global default categories: $e");
       return false;
     }
+  }
+
+  /// Gets all categories (both global defaults and user-created ones)
+  /// [email] - The user's email address
+  static Future<List<Map<String, dynamic>>> getAllCategories(
+      String email) async {
+    try {
+      List<Map<String, dynamic>> allCategories = [];
+
+      // Get global default categories
+      final globalCategoriesSnapshot =
+          await _firestore.collection('global_categories').get();
+
+      for (var doc in globalCategoriesSnapshot.docs) {
+        allCategories.add({
+          'id': doc.id,
+          'iconName': doc['iconName'],
+          'iconColor': doc['iconColor'],
+          'name': doc['name'],
+          'is_default': doc['is_default'] ?? true,
+          'is_global': true, // Mark as global category
+          'salesTaxApplicable': true, // Default tax settings
+          'salesTaxPercentage': 18.0,
+        });
+      }
+
+      // Get user-specific categories
+      final userCategoriesSnapshot = await _firestore
+          .collection('categories')
+          .where('email', isEqualTo: email)
+          .get();
+
+      for (var doc in userCategoriesSnapshot.docs) {
+        allCategories.add({
+          'id': doc.id,
+          'iconName': doc['iconName'],
+          'iconColor': doc['iconColor'],
+          'name': doc['name'],
+          'is_default': doc.data().toString().contains('is_default')
+              ? doc['is_default']
+              : false,
+          'is_global': false, // Mark as user category
+          'salesTaxApplicable':
+              doc.data().toString().contains('salesTaxApplicable')
+                  ? doc['salesTaxApplicable']
+                  : true,
+          'salesTaxPercentage':
+              doc.data().toString().contains('salesTaxPercentage')
+                  ? doc['salesTaxPercentage']
+                  : 18.0,
+        });
+      }
+
+      return allCategories;
+    } catch (e) {
+      log("Error getting all categories: $e");
+      return [];
+    }
+  }
+
+  /// Creates default categories for a new user (DEPRECATED - use createGlobalDefaultCategories instead)
+  /// This method is kept for backward compatibility but does nothing
+  @deprecated
+  static Future<bool> createDefaultCategories(String email) async {
+    log("createDefaultCategories is deprecated. Use createGlobalDefaultCategories instead.");
+    return true;
   }
 
   /// Adds a new default category to the configuration
@@ -136,7 +196,7 @@ class DefaultCategoriesService {
   /// Returns true if successful, false otherwise
   static Future<bool> resetToDefaultCategories(String email) async {
     try {
-      // Delete all existing categories for the user
+      // Delete all existing user categories
       final existingCategories = await _firestore
           .collection('categories')
           .where('email', isEqualTo: email)
@@ -148,19 +208,20 @@ class DefaultCategoriesService {
       }
       await deleteBatch.commit();
 
-      // Create default categories
-      return await createDefaultCategories(email);
+      // Note: We don't create new categories here since they're now global
+      log("User categories reset. Global categories will be available automatically.");
+      return true;
     } catch (e) {
       log("Error resetting categories to defaults for $email: $e");
       return false;
     }
   }
 
-  /// Checks if a user has any categories
+  /// Checks if a user has any custom categories (not including global ones)
   ///
   /// [email] - The user's email address
-  /// Returns true if user has categories, false otherwise
-  static Future<bool> userHasCategories(String email) async {
+  /// Returns true if user has custom categories, false otherwise
+  static Future<bool> userHasCustomCategories(String email) async {
     try {
       final snapshot = await _firestore
           .collection('categories')
@@ -170,16 +231,16 @@ class DefaultCategoriesService {
 
       return snapshot.docs.isNotEmpty;
     } catch (e) {
-      log("Error checking if user has categories: $e");
+      log("Error checking if user has custom categories: $e");
       return false;
     }
   }
 
-  /// Gets the count of categories for a user
+  /// Gets the count of custom categories for a user (not including global ones)
   ///
   /// [email] - The user's email address
-  /// Returns the number of categories
-  static Future<int> getCategoryCount(String email) async {
+  /// Returns the number of custom categories
+  static Future<int> getCustomCategoryCount(String email) async {
     try {
       final snapshot = await _firestore
           .collection('categories')
@@ -188,8 +249,36 @@ class DefaultCategoriesService {
 
       return snapshot.docs.length;
     } catch (e) {
-      log("Error getting category count: $e");
+      log("Error getting custom category count: $e");
       return 0;
     }
+  }
+
+  /// Gets the total count of categories for a user (global + custom)
+  ///
+  /// [email] - The user's email address
+  /// Returns the total number of categories
+  static Future<int> getTotalCategoryCount(String email) async {
+    try {
+      // Get global categories count
+      final globalSnapshot =
+          await _firestore.collection('global_categories').get();
+
+      // Get user categories count
+      final userSnapshot = await _firestore
+          .collection('categories')
+          .where('email', isEqualTo: email)
+          .get();
+
+      return globalSnapshot.docs.length + userSnapshot.docs.length;
+    } catch (e) {
+      log("Error getting total category count: $e");
+      return 0;
+    }
+  }
+
+  /// Initialize global categories (call this once when the app starts)
+  static Future<void> initializeGlobalCategories() async {
+    await createGlobalDefaultCategories();
   }
 }
