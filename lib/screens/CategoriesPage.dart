@@ -1,4 +1,5 @@
 import 'package:ExpenseTracker/screens/EditCategoryScreen.dart';
+import 'package:ExpenseTracker/Services/CategoriesService.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ExpenseTracker/screens/AddCategoryPage.dart';
@@ -13,40 +14,30 @@ class CategoriesPage extends StatefulWidget {
 
 class _CategoriesPageState extends State<CategoriesPage> {
   List<Map<String, dynamic>> _categoryItems = [];
+  String? _userEmail;
 
   @override
   void initState() {
     super.initState();
-    fetchCategories();
+    _initializeData();
   }
 
-  // Function to fetch categories from Firestore
-  Future<void> fetchCategories() async {
-    try {
-      QuerySnapshot snapshot = await FirebaseFirestore.instance
-          .collection('categories')
-          .orderBy('createdAt', descending: false)
-          .get();
+  // Initialize user data and fetch categories
+  Future<void> _initializeData() async {
+    final prefs = await SharedPreferences.getInstance();
+    _userEmail = prefs.getString('email');
+    if (_userEmail != null) {
+      fetchCategories();
+    }
+  }
 
-      List<Map<String, dynamic>> categories = snapshot.docs.map((doc) {
-        return {
-          "id": doc.id,
-          "iconName": doc['iconName'],
-          "name": doc['name'],
-          "iconColor": doc['iconColor'],
-          "isDefault": doc.data().toString().contains('isDefault')
-              ? doc['isDefault']
-              : false,
-          "salesTaxApplicable":
-              doc.data().toString().contains('salesTaxApplicable')
-                  ? doc['salesTaxApplicable']
-                  : true,
-          "salesTaxPercentage":
-              doc.data().toString().contains('salesTaxPercentage')
-                  ? doc['salesTaxPercentage']
-                  : 18.0,
-        };
-      }).toList();
+  // Function to fetch categories using the new service method
+  Future<void> fetchCategories() async {
+    if (_userEmail == null) return;
+
+    try {
+      List<Map<String, dynamic>> categories =
+          await DefaultCategoriesService.getAllCategories(_userEmail!);
 
       setState(() {
         _categoryItems = categories;
@@ -57,8 +48,19 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   // Function to delete category and its related transactions
-  Future<void> deleteCategory(
-      String categoryId, String categoryName, bool isDefault) async {
+  Future<void> deleteCategory(String categoryId, String categoryName,
+      bool isDefault, bool isGlobal) async {
+    // Prevent deletion of global default categories
+    if (isGlobal) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Default categories cannot be deleted'),
+          backgroundColor: Color.fromRGBO(253, 60, 74, 1),
+        ),
+      );
+      return;
+    }
+
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? email = prefs.getString('email');
@@ -141,6 +143,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
 
   // Show edit/delete options dialog
   void _showCategoryOptionsDialog(Map<String, dynamic> category) {
+    bool isGlobal = category['is_global'] ?? false;
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -182,7 +186,24 @@ class _CategoriesPageState extends State<CategoriesPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (category['isDefault'] == true)
+              if (isGlobal)
+                Container(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.public, size: 16, color: Colors.green),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'This is a global default category',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!isGlobal && (category['is_default'] == true))
                 Container(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Row(
@@ -190,7 +211,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                       Icon(Icons.info_outline, size: 16, color: Colors.blue),
                       const SizedBox(width: 8),
                       const Text(
-                        'This is a default category',
+                        'This is a custom category',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.blue,
@@ -223,27 +244,30 @@ class _CategoriesPageState extends State<CategoriesPage> {
                 Navigator.of(context).pop();
               },
             ),
-            TextButton(
-              child: const Text('Edit'),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _editCategory(category);
-              },
-            ),
-            TextButton(
-              child: const Text(
-                'Delete',
-                style: TextStyle(color: Colors.red),
+            if (!isGlobal) // Only show edit for custom categories
+              TextButton(
+                child: const Text('Edit'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _editCategory(category);
+                },
               ),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _showDeleteConfirmationDialog(
-                  category['id'],
-                  category['name'],
-                  category['isDefault'] ?? false,
-                );
-              },
-            ),
+            if (!isGlobal) // Only show delete for custom categories
+              TextButton(
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _showDeleteConfirmationDialog(
+                    category['id'],
+                    category['name'],
+                    category['is_default'] ?? false,
+                    isGlobal,
+                  );
+                },
+              ),
           ],
         );
       },
@@ -262,16 +286,14 @@ class _CategoriesPageState extends State<CategoriesPage> {
 
   // Show delete confirmation dialog
   void _showDeleteConfirmationDialog(
-      String id, String categoryName, bool isDefault) {
+      String id, String categoryName, bool isDefault, bool isGlobal) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Delete Category'),
           content: Text(
-            isDefault
-                ? 'Do you want to delete this default category? All related transactions will also be deleted.'
-                : 'Do you want to delete this category? All related transactions will also be deleted.',
+            'Do you want to delete this custom category? All related transactions will also be deleted.',
             style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
           ),
           actions: [
@@ -287,7 +309,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                 style: TextStyle(color: Colors.red),
               ),
               onPressed: () {
-                deleteCategory(id, categoryName, isDefault);
+                deleteCategory(id, categoryName, isDefault, isGlobal);
                 Navigator.of(context).pop();
               },
             ),
@@ -341,7 +363,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'No Categories Yet',
+                    'Loading Categories...',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -350,7 +372,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Create your first category to start organizing your expenses',
+                    'Please wait while we load your categories',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
@@ -405,7 +427,26 @@ class _CategoriesPageState extends State<CategoriesPage> {
                               ),
                             ),
                           ),
-                          if (item['isDefault'] == true)
+                          if (item['is_global'] == true)
+                            Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'Global',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          if (item['is_global'] != true &&
+                              item['is_default'] == true)
                             Container(
                               margin: const EdgeInsets.only(left: 8),
                               padding: const EdgeInsets.symmetric(
@@ -415,7 +456,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
-                                'Default',
+                                'Custom',
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: Color.fromRGBO(127, 61, 255, 1),
