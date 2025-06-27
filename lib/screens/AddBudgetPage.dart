@@ -426,61 +426,6 @@ class _AddBudgetPageState extends State<AddBudgetPage>
                                     ],
                                   ),
                                 ),
-
-                                ///
-                                const SizedBox(height: 12),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Receive Alert',
-                                          style: TextStyle(
-                                            color: Colors.black,
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        SizedBox(height: 5),
-                                        Text(
-                                          'Receive alert when it reaches some point.',
-                                          style: TextStyle(
-                                            color: Colors.grey,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Switch(
-                                      value: alert,
-                                      activeColor:
-                                          const Color.fromRGBO(127, 61, 255, 1),
-                                      onChanged: (bool value) {
-                                        setState(() {
-                                          alert = value;
-                                        });
-                                      },
-                                    ),
-                                  ],
-                                ),
-                                if (alert) ...[
-                                  Slider(
-                                    value: _currentSliderValue,
-                                    max: 100,
-                                    divisions: 10,
-                                    activeColor:
-                                        const Color.fromRGBO(127, 61, 255, 1),
-                                    label: "${_currentSliderValue.round()}%",
-                                    onChanged: (double value) {
-                                      setState(() {
-                                        _currentSliderValue = value;
-                                      });
-                                    },
-                                  ),
-                                ],
                                 const SizedBox(height: 16),
                                 SizedBox(
                                   height: 56,

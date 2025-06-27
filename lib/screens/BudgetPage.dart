@@ -419,11 +419,6 @@ class _BudgetPageState extends State<BudgetPage> {
           ),
         ],
       ),
-      bottomNavigationBar: CustomBottomNavigationBar(
-        activeIndex: _activeIndex,
-      ),
-      floatingActionButton: const CircularMenuWidget(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
     );
   }
 }
