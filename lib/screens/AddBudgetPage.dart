@@ -5,6 +5,7 @@ import 'package:flutter/physics.dart';
 import 'package:ExpenseTracker/widgets/custom_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:ExpenseTracker/Services/CategoriesService.dart';
 
 class AddBudgetPage extends StatefulWidget {
   const AddBudgetPage({super.key});
@@ -33,7 +34,6 @@ class _AddBudgetPageState extends State<AddBudgetPage>
     'Taxi': Icons.local_taxi,
 
     // Utilities
-
     'Plumbing': Icons.plumbing,
 
     // Entertainment
@@ -50,13 +50,11 @@ class _AddBudgetPageState extends State<AddBudgetPage>
     'Gym': Icons.fitness_center,
     'Hospital': Icons.local_hospital,
     'Pharmacy': Icons.local_pharmacy,
-
     'FirstAid': Icons.healing,
 
     // Home and Rent
     'Rent': Icons.home,
     'Apartment': Icons.apartment,
-
     'Kitchen': Icons.kitchen,
     'Furniture': Icons.weekend,
     // Add more icons as needed
@@ -121,24 +119,32 @@ class _AddBudgetPageState extends State<AddBudgetPage>
   }
 
   Future<void> fetchCategories() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('email') ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email') ?? '';
 
-    final snapshot = await FirebaseFirestore.instance
-        .collection('categories')
-        .where('email', isEqualTo: email)
-        .get();
+      // Use the DefaultCategoriesService to get all categories
+      final allCategories =
+          await DefaultCategoriesService.getAllCategories(email);
 
-    setState(() {
-      categories = snapshot.docs.map((doc) {
-        return {
-          "id": doc.id,
-          "iconName": doc['iconName'],
-          "name": doc['name'],
-          "iconColor": doc['iconColor'],
-        };
-      }).toList();
-    });
+      setState(() {
+        categories = allCategories.map((category) {
+          return {
+            "id": category['id'],
+            "iconName": category['iconName'],
+            "name": category['name'],
+            "iconColor": category['iconColor'],
+            "is_global": category['is_global'] ?? false,
+          };
+        }).toList();
+      });
+    } catch (e) {
+      debugPrint("Error fetching categories: $e");
+      // Fallback to empty list if there's an error
+      setState(() {
+        categories = [];
+      });
+    }
   }
 
   Future<void> saveBudget() async {
@@ -154,6 +160,8 @@ class _AddBudgetPageState extends State<AddBudgetPage>
           final budgetData = {
             'email': email,
             'name': selectedCategory!['name'],
+            'iconName': selectedCategory!['iconName'],
+            'iconColor': selectedCategory!['iconColor'],
             'balance': amount,
             'current_month': currentMonth,
             'is_alert': alert,
@@ -161,28 +169,52 @@ class _AddBudgetPageState extends State<AddBudgetPage>
             'spend': 0,
             'alert_msg': "You've exceeded the limit!",
             'alert_percentage': alert ? _currentSliderValue : null,
+            'created_at': FieldValue.serverTimestamp(),
+            'salesTaxApplicable': true,
+            'salesTaxPercentage': 18.0,
           };
 
           try {
-            final snapshot = await FirebaseFirestore.instance
-                .collection('categories')
-                .where('email', isEqualTo: email)
-                .where('name', isEqualTo: selectedCategory!['name'])
-                .get();
+            // Check if this is a global category or user category
+            bool isGlobalCategory = selectedCategory!['is_global'] ?? false;
 
-            if (snapshot.docs.isNotEmpty) {
-              final docId = snapshot.docs.first.id;
+            if (isGlobalCategory) {
+              // For global categories, create a new user-specific document
               await FirebaseFirestore.instance
                   .collection('categories')
-                  .doc(docId)
-                  .update(budgetData);
+                  .add(budgetData);
 
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Budget updated successfully!')));
+                  content: Text('Budget created successfully!')));
             } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Category not found')));
+              // For user categories, update the existing document
+              final snapshot = await FirebaseFirestore.instance
+                  .collection('categories')
+                  .where('email', isEqualTo: email)
+                  .where('name', isEqualTo: selectedCategory!['name'])
+                  .get();
+
+              if (snapshot.docs.isNotEmpty) {
+                final docId = snapshot.docs.first.id;
+                await FirebaseFirestore.instance
+                    .collection('categories')
+                    .doc(docId)
+                    .update(budgetData);
+
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Budget updated successfully!')));
+              } else {
+                // If document doesn't exist, create it
+                await FirebaseFirestore.instance
+                    .collection('categories')
+                    .add(budgetData);
+
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Budget created successfully!')));
+              }
             }
+
+            Navigator.pop(context); // Go back after successful save
           } catch (e) {
             ScaffoldMessenger.of(context)
                 .showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -380,13 +412,36 @@ class _AddBudgetPageState extends State<AddBudgetPage>
                                             ),
                                           ),
                                           const SizedBox(width: 12),
-                                          Text(
-                                            category['name'],
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              color: Colors.black87,
+                                          Expanded(
+                                            child: Text(
+                                              category['name'],
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                color: Colors.black87,
+                                              ),
                                             ),
                                           ),
+                                          if (category['is_global'] ?? false)
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue
+                                                    .withOpacity(0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              ),
+                                              child: const Text(
+                                                'Global',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.blue,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     );
@@ -423,6 +478,80 @@ class _AddBudgetPageState extends State<AddBudgetPage>
                                           color: Colors.black54,
                                         ),
                                       ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                // Alert Settings Section
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF1F1FA),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text(
+                                            'Receive Alert',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          Switch(
+                                            value: alert,
+                                            onChanged: (value) {
+                                              setState(() {
+                                                alert = value;
+                                              });
+                                            },
+                                            activeColor: const Color.fromRGBO(
+                                                127, 61, 255, 1),
+                                          ),
+                                        ],
+                                      ),
+                                      if (alert) ...[
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'Alert at ${_currentSliderValue.round()}% of budget',
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.black54,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        SliderTheme(
+                                          data:
+                                              SliderTheme.of(context).copyWith(
+                                            activeTrackColor:
+                                                const Color.fromRGBO(
+                                                    127, 61, 255, 1),
+                                            inactiveTrackColor:
+                                                Colors.grey[300],
+                                            thumbColor: const Color.fromRGBO(
+                                                127, 61, 255, 1),
+                                            overlayColor: const Color.fromRGBO(
+                                                127, 61, 255, 0.2),
+                                          ),
+                                          child: Slider(
+                                            value: _currentSliderValue,
+                                            min: 50,
+                                            max: 100,
+                                            divisions: 10,
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _currentSliderValue = value;
+                                              });
+                                            },
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),
