@@ -51,7 +51,6 @@ class BudgetController {
       await categoryDoc.update({'spend': updatedSpend});
 
       debugPrint("Spend updated successfully.");
-
     } catch (e) {
       debugPrint("Error updating spend amount: $e");
     }
