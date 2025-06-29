@@ -142,6 +142,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 
   // Show edit/delete options dialog
+  // Show edit/delete options dialog
   void _showCategoryOptionsDialog(Map<String, dynamic> category) {
     bool isGlobal = category['is_global'] ?? false;
 
@@ -149,9 +150,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: Row(
             children: [
               Container(
@@ -189,11 +189,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
               if (isGlobal)
                 Container(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
+                  child: const Row(
                     children: [
                       Icon(Icons.public, size: 16, color: Colors.green),
-                      const SizedBox(width: 8),
-                      const Text(
+                      SizedBox(width: 8),
+                      Text(
                         'This is a global default category',
                         style: TextStyle(
                           fontSize: 12,
@@ -206,11 +206,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
               if (!isGlobal && (category['is_default'] == true))
                 Container(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
+                  child: const Row(
                     children: [
                       Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                      const SizedBox(width: 8),
-                      const Text(
+                      SizedBox(width: 8),
+                      Text(
                         'This is a custom category',
                         style: TextStyle(
                           fontSize: 12,
@@ -228,35 +228,66 @@ class _CategoriesPageState extends State<CategoriesPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'What would you like to do?',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
+              // Styled "What would you like to do?" section matching delete dialog
+              const Row(
+                children: [
+                  Icon(Icons.help_outline, color: Colors.red, size: 28),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'What would you like to do?',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Choose an action for this category.',
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
           actions: [
             TextButton(
-              child: const Text('Cancel'),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.black)),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
             if (!isGlobal) // Only show edit for custom categories
-              TextButton(
-                child: const Text('Edit'),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.edit_outlined,
+                    color: Colors.white, size: 18),
+                label:
+                    const Text('Edit', style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  elevation: 0,
+                ),
                 onPressed: () {
                   Navigator.of(context).pop();
                   _editCategory(category);
                 },
               ),
             if (!isGlobal) // Only show delete for custom categories
-              TextButton(
-                child: const Text(
-                  'Delete',
-                  style: TextStyle(color: Colors.red),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.delete_outline,
+                    color: Colors.white, size: 18),
+                label:
+                    const Text('Delete', style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  elevation: 0,
                 ),
                 onPressed: () {
                   Navigator.of(context).pop();
@@ -274,7 +305,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
     );
   }
 
-  // Navigate to edit category page
+// Navigate to edit category page
   void _editCategory(Map<String, dynamic> category) {
     Navigator.push(
       context,
@@ -291,22 +322,54 @@ class _CategoriesPageState extends State<CategoriesPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Delete Category'),
-          content: Text(
-            'Do you want to delete this custom category? All related transactions will also be deleted.',
-            style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Delete Category',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Are you sure you want to delete the category "$categoryName"?',
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'All related transactions will also be deleted. This action cannot be undone.',
+                style: TextStyle(fontSize: 13, color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
           actions: [
             TextButton(
-              child: const Text('No'),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.black)),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
-            TextButton(
-              child: const Text(
-                'Yes',
-                style: TextStyle(color: Colors.red),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete_outline,
+                  color: Colors.white, size: 18),
+              label:
+                  const Text('Delete', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                elevation: 0,
               ),
               onPressed: () {
                 deleteCategory(id, categoryName, isDefault, isGlobal);
@@ -325,18 +388,12 @@ class _CategoriesPageState extends State<CategoriesPage> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () {
-            Navigator.pop(context);
-          },
-        ),
+        automaticallyImplyLeading: false,
         title: const Text(
-          "Categories",
+          'Manage Categories',
           style: TextStyle(
             color: Colors.black,
-            fontSize: 32,
+            fontSize: 24,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -466,12 +523,31 @@ class _CategoriesPageState extends State<CategoriesPage> {
                             ),
                         ],
                       ),
-                      subtitle: Text(
-                        'Tax: ${item['salesTaxApplicable'] == true ? '${item['salesTaxPercentage']}%' : 'Exempt'}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
+                      subtitle: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: item['salesTaxApplicable'] == true
+                                  ? const Color.fromRGBO(253, 60, 74, 0.12)
+                                  : Colors.green.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              item['salesTaxApplicable'] == true
+                                  ? 'Tax: ${item['salesTaxPercentage']}%'
+                                  : 'Exempt',
+                              style: TextStyle(
+                                color: item['salesTaxApplicable'] == true
+                                    ? const Color.fromRGBO(253, 60, 74, 1)
+                                    : Colors.green,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       trailing: const Icon(
                         Icons.more_vert,
