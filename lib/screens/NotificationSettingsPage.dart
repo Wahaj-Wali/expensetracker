@@ -1,6 +1,6 @@
+import 'package:ExpenseTracker/Services/BudgetNotificationService.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// import 'package:your_app/Services/BudgetNotificationService.dart';
 
 class NotificationSettingsPage extends StatefulWidget {
   const NotificationSettingsPage({super.key});
@@ -49,13 +49,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       await prefs.setBool('budget_warning_alerts', _budgetWarningAlerts);
       await prefs.setBool('daily_summary_notifications', _dailySummary);
 
-      // Update notification service
-      // Uncomment after implementing BudgetNotificationService
-      // await BudgetNotificationService.setNotificationsEnabled(_notificationsEnabled);
+      await BudgetNotificationService.setNotificationsEnabled(
+          _notificationsEnabled);
 
       if (!_notificationsEnabled) {
-        // Cancel all notifications if disabled
-        // await BudgetNotificationService.cancelAllNotifications();
+        await BudgetNotificationService.cancelAllNotifications();
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -77,15 +75,12 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
   Future<void> _testNotification() async {
     try {
-      // Uncomment after implementing BudgetNotificationService
-      /*
       await BudgetNotificationService.showBudgetExceededNotification(
         categoryName: "Test Category",
         spentAmount: 1200.0,
         budgetAmount: 1000.0,
         alertMessage: "This is a test notification!",
       );
-      */
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
