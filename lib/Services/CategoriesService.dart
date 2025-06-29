@@ -59,19 +59,10 @@ class DefaultCategoriesService {
   ];
 
   /// Creates default categories as global categories (not user-specific)
-  /// This should be called once during app initialization or admin setup
+  /// This should be called MANUALLY by admin when needed
+  /// Will NOT auto-create if categories don't exist
   static Future<bool> createGlobalDefaultCategories() async {
     try {
-      // Check if global default categories already exist
-      final existingCategories =
-          await _firestore.collection('global_categories').limit(1).get();
-
-      // If global categories already exist, don't create defaults
-      if (existingCategories.docs.isNotEmpty) {
-        log("Global default categories already exist, skipping creation");
-        return true;
-      }
-
       // Create batch write for better performance
       WriteBatch batch = _firestore.batch();
 
@@ -113,8 +104,9 @@ class DefaultCategoriesService {
           'name': doc['name'],
           'is_default': doc['is_default'] ?? true,
           'is_global': true, // Mark as global category
-          'salesTaxApplicable': true, // Default tax settings
-          'salesTaxPercentage': 18.0,
+          'salesTaxApplicable':
+              doc['salesTaxApplicable'] ?? true, // Default tax settings
+          'salesTaxPercentage': doc['salesTaxPercentage'] ?? 18.0,
         });
       }
 
@@ -277,8 +269,33 @@ class DefaultCategoriesService {
     }
   }
 
-  /// Initialize global categories (call this once when the app starts)
-  static Future<void> initializeGlobalCategories() async {
-    await createGlobalDefaultCategories();
+  /// Checks if global categories exist
+  /// Returns true if global categories exist, false otherwise
+  static Future<bool> globalCategoriesExist() async {
+    try {
+      final snapshot =
+          await _firestore.collection('global_categories').limit(1).get();
+
+      return snapshot.docs.isNotEmpty;
+    } catch (e) {
+      log("Error checking if global categories exist: $e");
+      return false;
+    }
   }
+
+  /// Gets the count of global categories
+  /// Returns the number of global categories
+  static Future<int> getGlobalCategoryCount() async {
+    try {
+      final snapshot = await _firestore.collection('global_categories').get();
+      return snapshot.docs.length;
+    } catch (e) {
+      log("Error getting global category count: $e");
+      return 0;
+    }
+  }
+
+  /// REMOVED: initializeGlobalCategories method
+  /// Global categories will only be created manually by admin
+  /// No automatic initialization will occur
 }

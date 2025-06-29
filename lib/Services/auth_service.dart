@@ -1,5 +1,6 @@
 import 'dart:developer';
 import 'package:ExpenseTracker/Services/CategoriesService.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -39,30 +40,59 @@ class AuthService {
     }
   }
 
-  // Initialize global categories on app startup
+  // Initialize app - check if global categories exist
   Future<void> initializeApp() async {
     try {
-      await DefaultCategoriesService.initializeGlobalCategories();
-      log("Global categories initialized successfully");
+      bool globalCategoriesExist =
+          await DefaultCategoriesService.globalCategoriesExist();
+      if (globalCategoriesExist) {
+        log("Global categories already exist");
+      } else {
+        log("Global categories do not exist. Admin needs to create them manually.");
+      }
     } catch (e) {
-      log("Error initializing global categories: $e");
+      log("Error checking global categories: $e");
     }
   }
 
-  // Admin method to run complete migration (should be called once)
-  Future<bool> runCompleteMigration() async {
+  // Admin method to create global categories (should be called manually by admin)
+  Future<bool> createGlobalCategories() async {
     try {
-      log("Starting complete migration to global categories...");
-      bool success = await DefaultCategoriesService.completeMigrationProcess();
+      log("Creating global categories...");
+      bool success =
+          await DefaultCategoriesService.createGlobalDefaultCategories();
       if (success) {
-        log("Migration to global categories completed successfully");
+        log("Global categories created successfully");
       } else {
-        log("Migration to global categories failed");
+        log("Failed to create global categories");
       }
       return success;
     } catch (e) {
-      log("Error during migration: $e");
+      log("Error creating global categories: $e");
       return false;
+    }
+  }
+
+  // Admin method to check global categories status
+  Future<Map<String, dynamic>> getGlobalCategoriesStatus() async {
+    try {
+      bool exist = await DefaultCategoriesService.globalCategoriesExist();
+      int count = await DefaultCategoriesService.getGlobalCategoryCount();
+
+      return {
+        'exist': exist,
+        'count': count,
+        'message': exist
+            ? 'Global categories exist ($count categories)'
+            : 'Global categories do not exist'
+      };
+    } catch (e) {
+      log("Error getting global categories status: $e");
+      return {
+        'exist': false,
+        'count': 0,
+        'message': 'Error checking global categories status'
+      };
     }
   }
 
@@ -347,6 +377,48 @@ class AuthService {
       return false;
     } catch (e) {
       log("Error checking admin status: $e");
+      return false;
+    }
+  }
+
+  // Helper method to get user's category statistics
+  Future<Map<String, int>> getUserCategoryStats(String email) async {
+    try {
+      int totalCategories =
+          await DefaultCategoriesService.getTotalCategoryCount(email);
+      int customCategories =
+          await DefaultCategoriesService.getCustomCategoryCount(email);
+      int globalCategories =
+          await DefaultCategoriesService.getGlobalCategoryCount();
+
+      return {
+        'total': totalCategories,
+        'custom': customCategories,
+        'global': globalCategories,
+      };
+    } catch (e) {
+      log("Error getting user category stats: $e");
+      return {
+        'total': 0,
+        'custom': 0,
+        'global': 0,
+      };
+    }
+  }
+
+  // Helper method to reset user categories to defaults (admin function)
+  Future<bool> resetUserCategoriesToDefaults(String email) async {
+    try {
+      bool success =
+          await DefaultCategoriesService.resetToDefaultCategories(email);
+      if (success) {
+        log("User categories reset to defaults for $email");
+      } else {
+        log("Failed to reset user categories for $email");
+      }
+      return success;
+    } catch (e) {
+      log("Error resetting user categories: $e");
       return false;
     }
   }
