@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+// Import the notification service
+// import 'package:your_app/Services/BudgetNotificationService.dart';
 
 class BudgetController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -92,9 +94,57 @@ class BudgetController {
 
         debugPrint(
             "Spend updated successfully for ${isUserCategory ? 'user' : 'global'} category: $categoryName");
+
+        // **NEW: Check for budget alerts after updating spend**
+        await _checkBudgetAlerts(categoryData, updatedSpend, categoryName);
       }
     } catch (e) {
       debugPrint("Error updating spend amount: $e");
+    }
+  }
+
+  /// **NEW METHOD: Check if budget alerts should be triggered**
+  Future<void> _checkBudgetAlerts(Map<String, dynamic> categoryData,
+      double newSpendAmount, String categoryName) async {
+    try {
+      final balance = (categoryData['balance'] as num?)?.toDouble() ?? 0.0;
+      final isAlert = categoryData['is_alert'] as bool? ?? false;
+      final alertPercentage =
+          (categoryData['alert_percentage'] as num?)?.toDouble() ?? 80.0;
+      final alertMessage =
+          categoryData['alert_msg'] as String? ?? "You've exceeded the limit!";
+
+      // Skip if no budget is set or alerts are disabled
+      if (balance <= 0 || !isAlert) return;
+
+      final spendPercentage = (newSpendAmount / balance) * 100;
+
+      // Import and uncomment these lines after adding the notification service
+      /*
+      // Check if budget is exceeded
+      if (newSpendAmount >= balance) {
+        await BudgetNotificationService.showBudgetExceededNotification(
+          categoryName: categoryName,
+          spentAmount: newSpendAmount,
+          budgetAmount: balance,
+          alertMessage: alertMessage,
+        );
+      }
+      // Check if approaching budget limit
+      else if (spendPercentage >= alertPercentage) {
+        await BudgetNotificationService.showBudgetWarningNotification(
+          categoryName: categoryName,
+          spentAmount: newSpendAmount,
+          budgetAmount: balance,
+          warningPercentage: spendPercentage,
+        );
+      }
+      */
+
+      debugPrint(
+          "Budget check completed for $categoryName: ${spendPercentage.toStringAsFixed(1)}% used");
+    } catch (e) {
+      debugPrint("Error checking budget alerts: $e");
     }
   }
 
@@ -285,6 +335,17 @@ class BudgetController {
     } catch (e) {
       debugPrint("Error getting budget progress: $e");
       return 0.0;
+    }
+  }
+
+  /// **NEW METHOD: Manual check for all budget alerts**
+  Future<void> checkAllBudgetAlerts() async {
+    try {
+      // Import and uncomment this line after adding the notification service
+      // await BudgetNotificationService.checkAndNotifyBudgets();
+      debugPrint("Manual budget alert check completed");
+    } catch (e) {
+      debugPrint("Error in manual budget alert check: $e");
     }
   }
 }
