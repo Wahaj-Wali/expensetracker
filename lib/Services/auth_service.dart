@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:ExpenseTracker/main.dart';
 import 'package:ExpenseTracker/screens/HomeScreen.dart';
 import 'package:ExpenseTracker/screens/SetPassword.dart';
-// Import the new service
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -50,6 +49,23 @@ class AuthService {
     }
   }
 
+  // Admin method to run complete migration (should be called once)
+  Future<bool> runCompleteMigration() async {
+    try {
+      log("Starting complete migration to global categories...");
+      bool success = await DefaultCategoriesService.completeMigrationProcess();
+      if (success) {
+        log("Migration to global categories completed successfully");
+      } else {
+        log("Migration to global categories failed");
+      }
+      return success;
+    } catch (e) {
+      log("Error during migration: $e");
+      return false;
+    }
+  }
+
   // Create user with email and password
   Future<Map<String, String>?> createUserWithEmailAndPassword(
       String name, String email, String password) async {
@@ -63,11 +79,11 @@ class AuthService {
         'name': name,
         'user_type': 'basic user',
         'is_tried': false,
+        'created_at': FieldValue.serverTimestamp(),
       });
 
-      // No longer creating default categories per user
-      // Global categories are available to all users automatically
-      log("User created successfully. Global categories are available.");
+      // Global categories are automatically available to all users
+      log("User created successfully. Global categories are automatically available.");
 
       // Return user data as a map
       return {'email': email, 'auth_id': authId};
@@ -100,6 +116,12 @@ class AuthService {
 
       if (querySnapshot.docs.isNotEmpty) {
         final userData = querySnapshot.docs.first.data();
+
+        // Update last login timestamp
+        await querySnapshot.docs.first.reference.update({
+          'last_login': FieldValue.serverTimestamp(),
+        });
+
         return {
           'email': userData['email'] ?? '',
           'auth_id': userData['auth_id'] ?? '',
@@ -116,6 +138,7 @@ class AuthService {
     try {
       await _firestore.collection(collectionName).doc(authId).update({
         'user_type': 'premium user',
+        'upgraded_at': FieldValue.serverTimestamp(),
       });
       log("User type updated to premium user.");
     } catch (error) {
@@ -178,13 +201,24 @@ class AuthService {
 
         // If the user_type is null, set it to 'basic user'
         if (userDoc['user_type'] == null) {
-          await userDoc.reference.update({'user_type': 'basic user'});
+          await userDoc.reference.update({
+            'user_type': 'basic user',
+            'updated_at': FieldValue.serverTimestamp(),
+          });
         }
 
         // Save the profile image URL if it's not already set in Firestore
         if (photoURL != null && userDoc['profile_img'] == null) {
-          await userDoc.reference.update({'profile_img': photoURL});
+          await userDoc.reference.update({
+            'profile_img': photoURL,
+            'updated_at': FieldValue.serverTimestamp(),
+          });
         }
+
+        // Update last login timestamp
+        await userDoc.reference.update({
+          'last_login': FieldValue.serverTimestamp(),
+        });
 
         // If the password is not null, sign in and go to Home screen
         if (password != null && password.isNotEmpty) {
@@ -220,11 +254,12 @@ class AuthService {
           'password': null, // Password initially set to null
           'user_type': 'basic user',
           'profile_img': photoURL, // Save profile image URL
+          'created_at': FieldValue.serverTimestamp(),
+          'signup_method': 'google',
         });
 
-        // No longer creating default categories per user
-        // Global categories are available to all users automatically
-        log("New user created successfully. Global categories are available.");
+        // Global categories are automatically available to all users
+        log("New user created successfully. Global categories are automatically available.");
 
         // Redirect to SetPassword screen
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -280,5 +315,39 @@ class AuthService {
       };
     }
     return null;
+  }
+
+  // Get user details from Firestore
+  Future<Map<String, dynamic>?> getUserDetails(String email) async {
+    try {
+      final querySnapshot = await _firestore
+          .collection(collectionName)
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        return querySnapshot.docs.first.data();
+      }
+      return null;
+    } catch (e) {
+      log("Error getting user details: $e");
+      return null;
+    }
+  }
+
+  // Check if user is admin (you can customize this logic)
+  Future<bool> isUserAdmin(String email) async {
+    try {
+      final userDetails = await getUserDetails(email);
+      if (userDetails != null) {
+        return userDetails['user_type'] == 'admin' ||
+            userDetails['is_admin'] == true;
+      }
+      return false;
+    } catch (e) {
+      log("Error checking admin status: $e");
+      return false;
+    }
   }
 }
