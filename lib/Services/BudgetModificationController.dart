@@ -1,8 +1,7 @@
+import 'package:ExpenseTracker/Services/BudgetNotificationService.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// Import the notification service
-// import 'package:your_app/Services/BudgetNotificationService.dart';
 
 class BudgetController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -119,9 +118,6 @@ class BudgetController {
 
       final spendPercentage = (newSpendAmount / balance) * 100;
 
-      // Import and uncomment these lines after adding the notification service
-      /*
-      // Check if budget is exceeded
       if (newSpendAmount >= balance) {
         await BudgetNotificationService.showBudgetExceededNotification(
           categoryName: categoryName,
@@ -139,7 +135,6 @@ class BudgetController {
           warningPercentage: spendPercentage,
         );
       }
-      */
 
       debugPrint(
           "Budget check completed for $categoryName: ${spendPercentage.toStringAsFixed(1)}% used");
