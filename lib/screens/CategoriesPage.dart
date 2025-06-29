@@ -15,6 +15,7 @@ class CategoriesPage extends StatefulWidget {
 class _CategoriesPageState extends State<CategoriesPage> {
   List<Map<String, dynamic>> _categoryItems = [];
   String? _userEmail;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -26,79 +27,116 @@ class _CategoriesPageState extends State<CategoriesPage> {
   Future<void> _initializeData() async {
     final prefs = await SharedPreferences.getInstance();
     _userEmail = prefs.getString('email');
-    if (_userEmail != null) {
-      fetchCategories();
-    }
+    fetchCategories();
   }
 
-  // Function to fetch categories using the new service method
+  // Function to fetch global categories for admin panel
   Future<void> fetchCategories() async {
-    if (_userEmail == null) return;
+    setState(() {
+      _isLoading = true;
+    });
 
     try {
-      List<Map<String, dynamic>> categories =
-          await DefaultCategoriesService.getAllCategories(_userEmail!);
+      // Fetch only global categories since this is admin panel
+      final globalCategoriesSnapshot = await FirebaseFirestore.instance
+          .collection('global_categories')
+          .orderBy('name')
+          .get();
+
+      List<Map<String, dynamic>> categories = [];
+      for (var doc in globalCategoriesSnapshot.docs) {
+        categories.add({
+          'id': doc.id,
+          'iconName': doc['iconName'],
+          'iconColor': doc['iconColor'],
+          'name': doc['name'],
+          'is_default': doc['is_default'] ?? true,
+          'is_global': true,
+          'salesTaxApplicable': doc['salesTaxApplicable'] ?? true,
+          'salesTaxPercentage': doc['salesTaxPercentage'] ?? 18.0,
+          'created_at': doc['created_at'],
+        });
+      }
 
       setState(() {
         _categoryItems = categories;
+        _isLoading = false;
       });
     } catch (e) {
       print("Error fetching categories: $e");
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error loading categories'),
+            backgroundColor: Color.fromRGBO(253, 60, 74, 1),
+          ),
+        );
+      }
     }
   }
 
-  // Function to delete category and its related transactions
-  Future<void> deleteCategory(String categoryId, String categoryName,
-      bool isDefault, bool isGlobal) async {
-    // Prevent deletion of global default categories
-    if (isGlobal) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Default categories cannot be deleted'),
-          backgroundColor: Color.fromRGBO(253, 60, 74, 1),
-        ),
-      );
-      return;
-    }
+  // Function to delete global category and update all related transactions
+  Future<void> deleteGlobalCategory(
+      String categoryId, String categoryName) async {
+    setState(() {
+      _isLoading = true;
+    });
 
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? email = prefs.getString('email');
-
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
-      DocumentReference categoryRef =
-          FirebaseFirestore.instance.collection('categories').doc(categoryId);
-
+      // Delete the global category
+      DocumentReference categoryRef = FirebaseFirestore.instance
+          .collection('global_categories')
+          .doc(categoryId);
       batch.delete(categoryRef);
 
+      // Find all transactions that use this category across all users
       QuerySnapshot transactionsSnapshot = await FirebaseFirestore.instance
           .collection('transactions')
-          .where('email', isEqualTo: email)
           .where('category_name', isEqualTo: categoryName)
           .get();
 
+      // Delete all related transactions
       for (var doc in transactionsSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+
+      // Also check for transactions that might reference the category ID
+      QuerySnapshot transactionsByIdSnapshot = await FirebaseFirestore.instance
+          .collection('transactions')
+          .where('category_id', isEqualTo: categoryId)
+          .get();
+
+      for (var doc in transactionsByIdSnapshot.docs) {
         batch.delete(doc.reference);
       }
 
       await batch.commit();
 
+      // Update local state
       setState(() {
         _categoryItems.removeWhere((item) => item['id'] == categoryId);
+        _isLoading = false;
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('Category and related transactions deleted successfully'),
+          SnackBar(
+            content: Text(
+                'Global category "$categoryName" and ${transactionsSnapshot.docs.length + transactionsByIdSnapshot.docs.length} related transactions deleted successfully'),
             backgroundColor: Color.fromRGBO(0, 168, 107, 1),
           ),
         );
       }
     } catch (e) {
-      print("Error deleting category and transactions: $e");
+      print("Error deleting global category and transactions: $e");
+      setState(() {
+        _isLoading = false;
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -141,17 +179,15 @@ class _CategoriesPageState extends State<CategoriesPage> {
     return _flutterIcons[iconName];
   }
 
-  // Show edit/delete options dialog
-  // Show edit/delete options dialog
+  // Show admin category options dialog
   void _showCategoryOptionsDialog(Map<String, dynamic> category) {
-    bool isGlobal = category['is_global'] ?? false;
-
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           title: Row(
             children: [
               Container(
@@ -186,40 +222,24 @@ class _CategoriesPageState extends State<CategoriesPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (isGlobal)
-                Container(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.public, size: 16, color: Colors.green),
-                      SizedBox(width: 8),
-                      Text(
-                        'This is a global default category',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.green,
-                        ),
+              Container(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.admin_panel_settings,
+                        size: 16, color: Colors.red),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Global Category (Admin Panel)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              if (!isGlobal && (category['is_default'] == true))
-                Container(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text(
-                        'This is a custom category',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              ),
               Text(
                 'Tax: ${category['salesTaxApplicable'] == true ? '${category['salesTaxPercentage']}%' : 'Exempt'}',
                 style: TextStyle(
@@ -227,85 +247,88 @@ class _CategoriesPageState extends State<CategoriesPage> {
                   color: Colors.grey[600],
                 ),
               ),
-              const SizedBox(height: 16),
-              // Styled "What would you like to do?" section matching delete dialog
-              const Row(
-                children: [
-                  Icon(Icons.help_outline, color: Colors.red, size: 28),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'What would you like to do?',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 8),
+              Text(
+                'Created: ${category['created_at'] != null ? _formatDate(category['created_at']) : 'Unknown'}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[500],
+                ),
               ),
               const SizedBox(height: 16),
-              Text(
-                'Choose an action for this category.',
-                style: const TextStyle(fontSize: 16, color: Colors.black87),
-                textAlign: TextAlign.center,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber, size: 16, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Deleting this category will remove it for ALL users and delete ALL related transactions.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange[800],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
           actions: [
             TextButton(
-              child:
-                  const Text('Cancel', style: TextStyle(color: Colors.black)),
+              child: const Text('Cancel'),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
-            if (!isGlobal) // Only show edit for custom categories
-              ElevatedButton.icon(
-                icon: const Icon(Icons.edit_outlined,
-                    color: Colors.white, size: 18),
-                label:
-                    const Text('Edit', style: TextStyle(color: Colors.white)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
-                ),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _editCategory(category);
-                },
+            TextButton(
+              child: const Text('Edit'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _editCategory(category);
+              },
+            ),
+            TextButton(
+              child: const Text(
+                'Delete',
+                style: TextStyle(color: Colors.red),
               ),
-            if (!isGlobal) // Only show delete for custom categories
-              ElevatedButton.icon(
-                icon: const Icon(Icons.delete_outline,
-                    color: Colors.white, size: 18),
-                label:
-                    const Text('Delete', style: TextStyle(color: Colors.white)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
-                ),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _showDeleteConfirmationDialog(
-                    category['id'],
-                    category['name'],
-                    category['is_default'] ?? false,
-                    isGlobal,
-                  );
-                },
-              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showDeleteConfirmationDialog(
+                  category['id'],
+                  category['name'],
+                );
+              },
+            ),
           ],
         );
       },
     );
   }
 
-// Navigate to edit category page
+  // Helper method to format date
+  String _formatDate(dynamic timestamp) {
+    if (timestamp == null) return 'Unknown';
+    try {
+      if (timestamp is Timestamp) {
+        DateTime date = timestamp.toDate();
+        return '${date.day}/${date.month}/${date.year}';
+      }
+      return 'Unknown';
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  // Navigate to edit category page
   void _editCategory(Map<String, dynamic> category) {
     Navigator.push(
       context,
@@ -315,64 +338,87 @@ class _CategoriesPageState extends State<CategoriesPage> {
     ).then((_) => fetchCategories());
   }
 
-  // Show delete confirmation dialog
-  void _showDeleteConfirmationDialog(
-      String id, String categoryName, bool isDefault, bool isGlobal) {
+  // Show delete confirmation dialog with warning
+  void _showDeleteConfirmationDialog(String id, String categoryName) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: const Row(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          title: Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Delete Category',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+              Icon(Icons.warning, color: Colors.red, size: 24),
+              const SizedBox(width: 8),
+              const Text(
+                'Delete Global Category',
+                style: TextStyle(color: Colors.red),
               ),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Are you sure you want to delete the category "$categoryName"?',
-                style: const TextStyle(fontSize: 16, color: Colors.black87),
-                textAlign: TextAlign.center,
+                'Are you sure you want to delete "$categoryName"?',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'All related transactions will also be deleted. This action cannot be undone.',
-                style: TextStyle(fontSize: 13, color: Colors.red),
-                textAlign: TextAlign.center,
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.warning_amber, size: 16, color: Colors.red),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'This action will:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '• Remove this category for ALL users\n• Delete ALL transactions using this category\n• This action cannot be undone',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
           actions: [
             TextButton(
-              child:
-                  const Text('Cancel', style: TextStyle(color: Colors.black)),
+              child: const Text('Cancel'),
               onPressed: () {
                 Navigator.of(context).pop();
               },
             ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.delete_outline,
-                  color: Colors.white, size: 18),
-              label:
-                  const Text('Delete', style: TextStyle(color: Colors.white)),
+            ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                elevation: 0,
+                foregroundColor: Colors.white,
               ),
+              child: const Text('Delete Permanently'),
               onPressed: () {
-                deleteCategory(id, categoryName, isDefault, isGlobal);
+                deleteGlobalCategory(id, categoryName);
                 Navigator.of(context).pop();
               },
             ),
@@ -388,224 +434,293 @@ class _CategoriesPageState extends State<CategoriesPage> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        automaticallyImplyLeading: false,
-        title: const Text(
-          'Manage Categories',
-          style: TextStyle(
-            color: Colors.black,
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-          ),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          onPressed: () {
+            Navigator.pop(context);
+          },
         ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Show message if no categories exist
-          if (_categoryItems.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(24),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[200]!),
+        title: Row(
+          children: [
+            Icon(Icons.admin_panel_settings, color: Colors.red, size: 28),
+            const SizedBox(width: 8),
+            const Text(
+              "Admin Categories",
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
               ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.black),
+            onPressed: fetchCategories,
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.category_outlined,
-                    size: 48,
-                    color: Colors.grey[400],
+                  CircularProgressIndicator(
+                    color: Color.fromRGBO(127, 61, 255, 1),
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: 16),
                   Text(
-                    'Loading Categories...',
+                    'Loading categories...',
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Please wait while we load your categories',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[600],
+                      fontSize: 16,
+                      color: Colors.grey,
                     ),
                   ),
                 ],
               ),
-            ),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // Admin Info Banner
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.red, size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Admin Panel - Global Categories',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Changes here affect ALL users. Deleting categories will remove related transactions.',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.red[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
-          // Categories List
-          ..._categoryItems
-              .map((item) => Container(
-                    margin: const EdgeInsets.only(bottom: 12),
+                // Categories Count
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.category, color: Colors.blue, size: 24),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Total Global Categories: ${_categoryItems.length}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Show message if no categories exist
+                if (_categoryItems.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.grey.withOpacity(0.2),
-                          spreadRadius: 3,
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.category_outlined,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No Global Categories Found',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Add your first global category to get started',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(12),
-                      leading: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Color(int.parse(
-                                  item['iconColor'].replaceFirst('#', '0xFF')))
-                              .withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          getIconData(item['iconName']),
-                          color: Color(int.parse(
-                              item['iconColor'].replaceFirst('#', '0xFF'))),
-                        ),
-                      ),
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item['name'],
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                  ),
+
+                // Categories List
+                ..._categoryItems
+                    .map((item) => Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.grey.withOpacity(0.2),
+                                spreadRadius: 3,
+                                blurRadius: 12,
+                                offset: const Offset(0, 6),
                               ),
-                            ),
+                            ],
                           ),
-                          if (item['is_global'] == true)
-                            Container(
-                              margin: const EdgeInsets.only(left: 8),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(12),
+                            leading: Container(
+                              width: 48,
+                              height: 48,
                               decoration: BoxDecoration(
-                                color: Colors.green.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(4),
+                                color: Color(int.parse(item['iconColor']
+                                        .replaceFirst('#', '0xFF')))
+                                    .withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Text(
-                                'Global',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.green,
-                                  fontWeight: FontWeight.bold,
+                              child: Icon(
+                                getIconData(item['iconName']),
+                                color: Color(int.parse(item['iconColor']
+                                    .replaceFirst('#', '0xFF'))),
+                              ),
+                            ),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item['name'],
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          if (item['is_global'] != true &&
-                              item['is_default'] == true)
-                            Container(
-                              margin: const EdgeInsets.only(left: 8),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color.fromRGBO(127, 61, 255, 0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'Custom',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color.fromRGBO(127, 61, 255, 1),
-                                  fontWeight: FontWeight.bold,
+                                Container(
+                                  margin: const EdgeInsets.only(left: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    'Global',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
-                        ],
-                      ),
-                      subtitle: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: item['salesTaxApplicable'] == true
-                                  ? const Color.fromRGBO(253, 60, 74, 0.12)
-                                  : Colors.green.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              item['salesTaxApplicable'] == true
-                                  ? 'Tax: ${item['salesTaxPercentage']}%'
-                                  : 'Exempt',
+                            subtitle: Text(
+                              'Tax: ${item['salesTaxApplicable'] == true ? '${item['salesTaxPercentage']}%' : 'Exempt'}',
                               style: TextStyle(
-                                color: item['salesTaxApplicable'] == true
-                                    ? const Color.fromRGBO(253, 60, 74, 1)
-                                    : Colors.green,
-                                fontWeight: FontWeight.bold,
                                 fontSize: 12,
+                                color: Colors.grey[600],
                               ),
                             ),
+                            trailing: const Icon(
+                              Icons.admin_panel_settings,
+                              color: Colors.red,
+                            ),
+                            onTap: () => _showCategoryOptionsDialog(item),
                           ),
-                        ],
+                        ))
+                    .toList(),
+
+                // Add Category Tile
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.2),
+                        spreadRadius: 3,
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
                       ),
-                      trailing: const Icon(
-                        Icons.more_vert,
+                    ],
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.all(12),
+                    leading: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(127, 61, 255, 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.add,
+                        color: Color.fromRGBO(127, 61, 255, 1),
+                      ),
+                    ),
+                    title: const Text(
+                      'Add Global Category',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Color.fromRGBO(127, 61, 255, 1),
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Add a new category for all users',
+                      style: TextStyle(
+                        fontSize: 12,
                         color: Colors.grey,
                       ),
-                      onTap: () => _showCategoryOptionsDialog(item),
                     ),
-                  ))
-              .toList(),
-
-          // Add Category Tile
-          Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.2),
-                  spreadRadius: 3,
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const AddCategoryPage()),
+                      ).then((_) => fetchCategories());
+                    },
+                  ),
                 ),
               ],
             ),
-            child: ListTile(
-              contentPadding: const EdgeInsets.all(12),
-              leading: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: const Color.fromRGBO(127, 61, 255, 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.add,
-                  color: Color.fromRGBO(127, 61, 255, 1),
-                ),
-              ),
-              title: const Text(
-                'Add Category',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Color.fromRGBO(127, 61, 255, 1),
-                ),
-              ),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const AddCategoryPage()),
-                ).then((_) => fetchCategories());
-              },
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
