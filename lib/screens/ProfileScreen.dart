@@ -1,5 +1,9 @@
 import 'package:ExpenseTracker/screens/AccountPage.dart';
+import 'package:ExpenseTracker/screens/BudgetPage.dart';
 import 'package:ExpenseTracker/screens/CategoriesPage.dart';
+import 'package:ExpenseTracker/screens/NotificationSettingsPage.dart';
+import 'package:ExpenseTracker/screens/AddSplitBillScreen.dart';
+import 'package:ExpenseTracker/screens/SplitBill.dart';
 import 'package:flutter/material.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -25,6 +29,18 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
         centerTitle: false, // Aligned title to the left like BudgetPage
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications, color: Colors.black),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const NotificationSettingsPage()),
+              );
+            },
+          ),
+        ],
       ),
       body: SafeArea(
         child: Padding(
@@ -34,37 +50,30 @@ class ProfileScreen extends StatelessWidget {
             children: [
               const SizedBox(height: 20),
 
-              // Categories Tile
+              // Budget Tile
               _buildProfileTile(
                 context,
-                'Categories',
-                'Manage your expense and income categories',
-                Icons.category,
-                const Color.fromRGBO(
-                    126, 61, 255, 0.297), // Using the same background color
-                const Color.fromRGBO(
-                    127, 61, 255, 1), // Using the same icon color
+                'Budget',
+                'Manage your income and expenses from here',
+                Icons.account_box,
+                const Color.fromRGBO(126, 61, 255, 0.297),
+                const Color.fromRGBO(127, 61, 255, 1),
                 () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (context) => const CategoriesPage()),
+                    MaterialPageRoute(builder: (context) => const BudgetPage()),
                   );
                 },
               ),
-
-              const SizedBox(height: 16),
 
               // Accounts Tile
               _buildProfileTile(
                 context,
                 'Accounts',
-                'Manage your bank accounts and payment methods',
-                Icons.account_box,
-                const Color.fromRGBO(126, 61, 255,
-                    0.297), // Reusing the same background color for consistency
-                const Color.fromRGBO(127, 61, 255,
-                    1), // Reusing the same icon color for consistency
+                'Manage your expense and income categories',
+                Icons.category,
+                const Color.fromRGBO(126, 61, 255, 0.297),
+                const Color.fromRGBO(127, 61, 255, 1),
                 () {
                   Navigator.push(
                     context,
@@ -73,6 +82,8 @@ class ProfileScreen extends StatelessWidget {
                   );
                 },
               ),
+
+              const SizedBox(height: 16),
             ],
           ),
         ),

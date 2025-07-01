@@ -223,7 +223,10 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      transactionData!['converted_amount'] ?? "N/A",
+                      // Show original amount instead of converted_amount
+                      transactionData!['amount'] != null
+                          ? transactionData!['amount'].toString()
+                          : "N/A",
                       style: const TextStyle(
                         fontSize: 40,
                         fontWeight: FontWeight.bold,

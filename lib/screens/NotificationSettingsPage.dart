@@ -314,18 +314,6 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
             ),
 
             // Daily Summary
-            _buildNotificationTile(
-              icon: Icons.today_outlined,
-              title: 'Daily Summary',
-              subtitle: 'Receive daily spending summary',
-              value: _dailySummary,
-              enabled: _notificationsEnabled,
-              onChanged: (value) {
-                setState(() {
-                  _dailySummary = value;
-                });
-              },
-            ),
 
             const SizedBox(height: 24),
 
@@ -426,38 +414,6 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
             const SizedBox(height: 24),
 
             // Additional Info
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.blue.withOpacity(0.2),
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    color: Colors.blue[700],
-                    size: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Notifications help you stay on track with your budget goals. Make sure to enable notification permissions in your device settings.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.blue[700],
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),

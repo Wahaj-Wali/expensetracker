@@ -416,7 +416,7 @@ class _TransactionpageState extends State<Transactionpage> {
 
     // Add month-based filtering
     if (month != null) {
-      int monthIndex = _getMonthIndex(month); // Helper to get the month's index
+      int monthIndex = _getMonthIndex(month);
       int currentYear = DateTime.now().year;
 
       DateTime startOfMonth = DateTime(currentYear, monthIndex, 1);
@@ -451,11 +451,44 @@ class _TransactionpageState extends State<Transactionpage> {
           ? double.tryParse(data['amount']) ?? 0.0
           : data['amount'].toDouble();
 
-      // Calculate sales tax using the controller
+      // Get sales tax from stored transaction data (preferred method)
       double salesTax = 0.0;
-      if (data['transaction_type'] == 'Expense') {
-        salesTax = _salesTaxController.calculateSalesTaxForTransaction(
-            categoryName, amountValue);
+      if (data.containsKey('sales_tax_amount')) {
+        salesTax = data['sales_tax_amount'] is String
+            ? double.tryParse(data['sales_tax_amount']) ?? 0.0
+            : (data['sales_tax_amount'] ?? 0.0).toDouble();
+      } else if (data['transaction_type'] == 'Expense') {
+        // Fallback: calculate sales tax if not stored (for old transactions)
+        try {
+          // Query categories without email filter first, then with email filter
+          QuerySnapshot categorySnapshot = await categoriesRef
+              .where('name', isEqualTo: categoryName)
+              .limit(1)
+              .get();
+
+          if (categorySnapshot.docs.isEmpty) {
+            // Try with email filter
+            categorySnapshot = await categoriesRef
+                .where('email', isEqualTo: email)
+                .where('name', isEqualTo: categoryName)
+                .limit(1)
+                .get();
+          }
+
+          if (categorySnapshot.docs.isNotEmpty) {
+            var categoryData =
+                categorySnapshot.docs.first.data() as Map<String, dynamic>;
+            bool isTaxApplicable = categoryData['salesTaxApplicable'] ?? false;
+            if (isTaxApplicable) {
+              double taxRate =
+                  (categoryData['salesTaxPercentage'] ?? 0.0).toDouble();
+              salesTax = (amountValue * taxRate) / 100;
+            }
+          }
+        } catch (e) {
+          print("Error calculating fallback sales tax: $e");
+          // Continue without sales tax if calculation fails
+        }
       }
 
       String amount =
@@ -466,16 +499,45 @@ class _TransactionpageState extends State<Transactionpage> {
 
       String iconName = "";
       Color iconColor = Colors.grey;
-      if (data.containsKey('category_name')) {
-        QuerySnapshot categorySnapshot = await categoriesRef
-            .where('email', isEqualTo: email)
-            .where('name', isEqualTo: data['category_name'])
-            .get();
 
-        if (categorySnapshot.docs.isNotEmpty) {
-          iconName = categorySnapshot.docs.first['iconName'];
-          iconColor = Color(int.parse(categorySnapshot.docs.first['iconColor']
-              .replaceFirst('#', '0xff')));
+      // Query for category icon - try both with and without email filter
+      if (data.containsKey('category_name')) {
+        try {
+          QuerySnapshot categorySnapshot = await categoriesRef
+              .where('name', isEqualTo: data['category_name'])
+              .limit(1)
+              .get();
+
+          if (categorySnapshot.docs.isEmpty) {
+            // Try with email filter for user-specific categories
+            categorySnapshot = await categoriesRef
+                .where('email', isEqualTo: email)
+                .where('name', isEqualTo: data['category_name'])
+                .limit(1)
+                .get();
+          }
+
+          if (categorySnapshot.docs.isNotEmpty) {
+            var categoryData =
+                categorySnapshot.docs.first.data() as Map<String, dynamic>;
+            iconName = categoryData['iconName'] ?? '';
+            String colorString = categoryData['iconColor'] ?? '#757575';
+
+            // Parse color safely
+            try {
+              if (colorString.startsWith('#')) {
+                iconColor =
+                    Color(int.parse(colorString.replaceFirst('#', '0xff')));
+              } else {
+                iconColor = Colors.grey;
+              }
+            } catch (colorError) {
+              iconColor = Colors.grey;
+            }
+          }
+        } catch (e) {
+          print("Error fetching category data: $e");
+          // Continue with default icon and color
         }
       }
 
@@ -829,7 +891,7 @@ class _TransactionpageState extends State<Transactionpage> {
                                           style: const TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 18,
-                                            color: Colors.black87,
+                                            color: Colors.black,
                                           ),
                                         ),
                                       ),
@@ -863,131 +925,144 @@ class _TransactionpageState extends State<Transactionpage> {
         transaction.transactionType == "Expense" && transaction.salesTax > 0;
 
     return GestureDetector(
-      onTap: () {
-        if (transaction.id.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) =>
-                  DetailTransactionPage(transactionId: transaction.id),
-            ),
-          );
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 20.0),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(15),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.2),
-                spreadRadius: 3,
-                blurRadius: 12,
-                offset: const Offset(0, 6),
+        onTap: () {
+          if (transaction.id.isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) =>
+                    DetailTransactionPage(transactionId: transaction.id),
               ),
-            ],
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  // Icon section
-                  Container(
-                    height: 55,
-                    width: 55,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: transaction.transactionType == "Income"
-                          ? const Color.fromRGBO(0, 168, 107, 1)
-                              .withOpacity(0.1)
-                          : transaction.transactionType == "Expense"
-                              ? const Color.fromRGBO(253, 60, 74, 1)
-                                  .withOpacity(0.1)
-                              : const Color.fromRGBO(0, 119, 255, 1)
-                                  .withOpacity(0.1),
+            );
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 20.0),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 3,
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    // Icon section
+                    Container(
+                      height: 55,
+                      width: 55,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: transaction.transactionType == "Income"
+                            ? const Color.fromRGBO(0, 168, 107, 1)
+                                .withOpacity(0.1)
+                            : transaction.transactionType == "Expense"
+                                ? const Color.fromRGBO(253, 60, 74, 1)
+                                    .withOpacity(0.1)
+                                : const Color.fromRGBO(0, 119, 255, 1)
+                                    .withOpacity(0.1),
+                      ),
+                      child: Icon(
+                        transaction.icon,
+                        color: transaction.transactionType == "Income"
+                            ? const Color.fromRGBO(0, 168, 107, 1)
+                            : transaction.transactionType == "Expense"
+                                ? const Color.fromRGBO(253, 60, 74, 1)
+                                : const Color.fromRGBO(0, 119, 255, 1),
+                        size: 30,
+                      ),
                     ),
-                    child: Icon(
-                      transaction.icon,
-                      color: transaction.transactionType == "Income"
-                          ? const Color.fromRGBO(0, 168, 107, 1)
-                          : transaction.transactionType == "Expense"
-                              ? const Color.fromRGBO(253, 60, 74, 1)
-                              : const Color.fromRGBO(0, 119, 255, 1),
-                      size: 30,
+                    const SizedBox(width: 15),
+                    // Title and description
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            transaction.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              color: Colors.black,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            transaction.description,
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                          ),
+                          if (transaction.transactionType == "Expense") ...[
+                            const SizedBox(height: 5),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: transaction.salesTax > 0
+                                    ? const Color.fromRGBO(253, 60, 74, 0.12)
+                                    : Colors.green.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                transaction.salesTax > 0
+                                    ? 'Tax: ${transaction.salesTax.toStringAsFixed(2)}'
+                                    : 'Exempt',
+                                style: TextStyle(
+                                  color: transaction.salesTax > 0
+                                      ? const Color.fromRGBO(253, 60, 74, 1)
+                                      : Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 15),
-                  // Title and description
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    // Amount and time
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          transaction.title,
-                          style: const TextStyle(
+                          transaction.amount,
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.black,
+                            fontSize: 16,
+                            color: transaction.transactionType == "Income"
+                                ? const Color.fromRGBO(0, 168, 107, 1)
+                                : transaction.transactionType == "Expense"
+                                    ? const Color.fromRGBO(253, 60, 74, 1)
+                                    : const Color.fromRGBO(0, 119, 255, 1),
                           ),
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          transaction.description,
+                          transaction.time,
                           style: TextStyle(
                             color: Colors.grey[600],
-                            fontSize: 14,
+                            fontSize: 12,
                           ),
                         ),
-                        if (isTaxableExpense) ...[
-                          const SizedBox(height: 5),
-                          Text(
-                            'Sales Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 12,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
-                  ),
-                  // Amount and time
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        transaction.amount,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: transaction.transactionType == "Income"
-                              ? const Color.fromRGBO(0, 168, 107, 1)
-                              : transaction.transactionType == "Expense"
-                                  ? const Color.fromRGBO(253, 60, 74, 1)
-                                  : const Color.fromRGBO(0, 119, 255, 1),
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        transaction.time,
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      ),
-    );
+        ));
   }
 
   String _formatTransactionDate(DateTime date) {

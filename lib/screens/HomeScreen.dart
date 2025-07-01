@@ -558,7 +558,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 const SizedBox(height: 10),
                                 Text(
-                                  'Rs ${totalBalance.toStringAsFixed(0)}',
+                                  // Show total balance only for current month, else show "0"
+                                  currentMonth ==
+                                          DateFormat('MMMM')
+                                              .format(DateTime.now())
+                                      ? 'Rs ${totalBalance.toStringAsFixed(0)}'
+                                      : 'Rs 0',
                                   style: const TextStyle(
                                       fontSize: 50,
                                       fontWeight: FontWeight.bold),
@@ -595,7 +600,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             const Text(
                               'Spend Frequency',
-                              style: TextStyle(fontSize: 15),
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 20),
                             ),
                             const SizedBox(height: 10),
                             SizedBox(
@@ -608,76 +614,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ExpensePieChart(
                               month: currentMonth,
                             ),
-                            const SizedBox(height: 20),
-                            Expanded(
-                              child: FilterBar(
-                                isSelected: isSelected,
-                                onFilterChanged: _onFilterChanged,
-                              ),
-                            ),
+
                             const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text(
-                                  'Recent Transactions',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 18),
-                                ),
-                                GestureDetector(
-                                  onTap: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                          builder: (context) =>
-                                              const Transactionpage()),
-                                    );
-                                  },
-                                  child: Container(
-                                    height: 35,
-                                    width: 60,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      color: const Color.fromRGBO(
-                                          126, 61, 255, 0.297),
-                                      border: Border.all(
-                                          color: const Color.fromRGBO(
-                                              126, 61, 255, 1)),
-                                    ),
-                                    child: const Center(
-                                      child: Text(
-                                        'See All',
-                                        style: TextStyle(
-                                            color: Color.fromRGBO(
-                                                126, 61, 255, 1)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              height: 250,
-                              child: _transactions.isEmpty
-                                  ? const Text('No transactions found.')
-                                  : Expanded(
-                                      child: ListView.builder(
-                                        itemCount: _transactions.length,
-                                        itemBuilder: (context, index) {
-                                          final transaction =
-                                              _transactions[index];
-                                          return _buildTransactionCard(
-                                            transaction['title'],
-                                            transaction['subtitle'],
-                                            transaction['amount'],
-                                            transaction['time'],
-                                            transaction['icon'],
-                                          );
-                                        },
-                                      ),
-                                    ),
-                            ),
                           ],
                         ),
                       ),
@@ -765,30 +703,30 @@ class MonthDropdownButton extends StatefulWidget {
 }
 
 class _MonthDropdownButtonState extends State<MonthDropdownButton> {
-  final List<String> items = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
+  late final List<String> items;
   String? selectedValue;
 
   @override
   void initState() {
     super.initState();
-    // Set current month as default
+    // Only show months from January to current month
+    int currentMonthIndex = DateTime.now().month;
+    items = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ].sublist(0, currentMonthIndex);
     selectedValue = DateFormat('MMMM').format(DateTime.now());
-    // Call fetchMonthlyIncomeAndExpense with current month
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Using addPostFrameCallback to ensure the widget is mounted
       widget.onMonthSelected(selectedValue!);
     });
   }

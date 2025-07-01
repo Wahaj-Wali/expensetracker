@@ -8,8 +8,9 @@ import 'package:ExpenseTracker/Services/TransactionController.dart';
 import 'package:ExpenseTracker/screens/DetailTransactionPage.dart';
 import 'package:ExpenseTracker/widgets/custom_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../widgets/IncomeExpensePage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter/services.dart';
 
 class AddIncomePage extends StatefulWidget {
   const AddIncomePage({super.key});
@@ -25,11 +26,52 @@ class _AddIncomePageState extends State<AddIncomePage>
 
   final TextEditingController _editDescription = TextEditingController();
 
-  String _fromCurrency = '';
-  String _toCurrency = '';
+  // Currency conversion variables
+  String _fromCurrency = 'PKR';
+  String _toCurrency = 'USD';
   double _originalAmount = 0;
   String _convertedAmount = '';
+  final TextEditingController _amountController = TextEditingController();
+  bool _isLoading = false;
+  final TextEditingController _fromCurrencySearchController =
+      TextEditingController();
+  final TextEditingController _toCurrencySearchController =
+      TextEditingController();
 
+  final List<Map<String, String>> _currencies = [
+    {'code': 'PKR', 'name': 'Pakistani Rupee (PKR)'},
+    {'code': 'USD', 'name': 'US Dollar (USD)'},
+    {'code': 'EUR', 'name': 'Euro (EUR)'},
+    {'code': 'GBP', 'name': 'British Pound (GBP)'},
+    {'code': 'JPY', 'name': 'Japanese Yen (JPY)'},
+    {'code': 'CAD', 'name': 'Canadian Dollar (CAD)'},
+    {'code': 'AUD', 'name': 'Australian Dollar (AUD)'},
+    {'code': 'CHF', 'name': 'Swiss Franc (CHF)'},
+    {'code': 'CNY', 'name': 'Chinese Yuan (CNY)'},
+    {'code': 'INR', 'name': 'Indian Rupee (INR)'},
+    {'code': 'KRW', 'name': 'South Korean Won (KRW)'},
+    {'code': 'SGD', 'name': 'Singapore Dollar (SGD)'},
+    {'code': 'HKD', 'name': 'Hong Kong Dollar (HKD)'},
+    {'code': 'SEK', 'name': 'Swedish Krona (SEK)'},
+    {'code': 'NOK', 'name': 'Norwegian Krone (NOK)'},
+    {'code': 'MXN', 'name': 'Mexican Peso (MXN)'},
+    {'code': 'BRL', 'name': 'Brazilian Real (BRL)'},
+    {'code': 'ZAR', 'name': 'South African Rand (ZAR)'},
+    {'code': 'NZD', 'name': 'New Zealand Dollar (NZD)'},
+    {'code': 'AED', 'name': 'UAE Dirham (AED)'},
+    {'code': 'SAR', 'name': 'Saudi Riyal (SAR)'},
+    {'code': 'TRY', 'name': 'Turkish Lira (TRY)'},
+    {'code': 'RUB', 'name': 'Russian Ruble (RUB)'},
+    {'code': 'PLN', 'name': 'Polish Zloty (PLN)'},
+    {'code': 'CZK', 'name': 'Czech Koruna (CZK)'},
+    {'code': 'HUF', 'name': 'Hungarian Forint (HUF)'},
+    {'code': 'DKK', 'name': 'Danish Krone (DKK)'},
+    {'code': 'THB', 'name': 'Thai Baht (THB)'},
+    {'code': 'MYR', 'name': 'Malaysian Ringgit (MYR)'},
+    {'code': 'PHP', 'name': 'Philippine Peso (PHP)'},
+  ];
+
+  // Animation variables
   double topContainerHeight = 420;
   double bottomContainerHeight = 380;
   double maxHeight = 650;
@@ -215,6 +257,9 @@ class _AddIncomePageState extends State<AddIncomePage>
   void dispose() {
     _controller.dispose();
     _editDescription.dispose();
+    _amountController.dispose();
+    _fromCurrencySearchController.dispose();
+    _toCurrencySearchController.dispose();
     super.dispose();
   }
 
@@ -256,6 +301,93 @@ class _AddIncomePageState extends State<AddIncomePage>
       wallets =
           snapshot.docs.map((doc) => doc['account_name'] as String).toList();
     });
+  }
+
+  Future<void> _convertCurrency() async {
+    final value = _amountController.text.trim();
+    if (value.isEmpty) {
+      setState(() {
+        _convertedAmount = 'Amount?';
+      });
+      return;
+    }
+    if (value.startsWith('-')) {
+      setState(() {
+        _convertedAmount = 'Negative amounts not allowed';
+      });
+      return;
+    }
+    if (!RegExp(r'^\d*\.?\d{0,2}$').hasMatch(value)) {
+      setState(() {
+        _convertedAmount = 'Invalid amount format';
+      });
+      return;
+    }
+    double amount;
+    try {
+      amount = double.parse(value);
+      if (amount <= 0) {
+        setState(() {
+          _convertedAmount = 'Amount must be greater than 0';
+        });
+        return;
+      }
+    } catch (e) {
+      setState(() {
+        _convertedAmount = 'Amount should be greater than 0';
+      });
+      return;
+    }
+    setState(() {
+      _originalAmount = amount;
+    });
+
+    if (_fromCurrency == _toCurrency) {
+      setState(() {
+        _convertedAmount = amount.toStringAsFixed(2);
+      });
+      _handleConversionData(
+          _fromCurrency, _toCurrency, amount, amount.toStringAsFixed(2));
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse(
+            'https://currency-conversion-and-exchange-rates.p.rapidapi.com/convert?from=$_fromCurrency&to=$_toCurrency&amount=$amount'),
+        headers: {
+          'X-Rapidapi-Key':
+              '10c9117011msh3c078190ac01525p17ad91jsn085ab6bd036a',
+          'X-Rapidapi-Host':
+              'currency-conversion-and-exchange-rates.p.rapidapi.com',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final jsonResponse = json.decode(response.body);
+        setState(() {
+          _convertedAmount = double.parse(jsonResponse['result'].toString())
+              .toStringAsFixed(2);
+          _isLoading = false;
+        });
+        _handleConversionData(
+            _fromCurrency, _toCurrency, amount, _convertedAmount);
+      } else {
+        setState(() {
+          _convertedAmount = 'Failed to convert';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _convertedAmount = 'Connection error';
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -300,10 +432,247 @@ class _AddIncomePageState extends State<AddIncomePage>
                       fontSize: 18,
                     ),
                   ),
-                  Currency(
-                    color: const Color.fromRGBO(0, 168, 107, 1),
-                    onConvert: _handleConversionData,
+                  // --- Currency Converter UI (like IncomeExpensePage) ---
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextFormField(
+                          cursorColor: Colors.white,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 40,
+                          ),
+                          controller: _amountController,
+                          keyboardType:
+                              TextInputType.numberWithOptions(decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}')),
+                          ],
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            prefixIcon: Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              child: Icon(
+                                Icons.arrow_upward,
+                                color: Colors.white,
+                                size: 40,
+                              ),
+                            ),
+                            hintText: '0',
+                            hintStyle: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 40,
+                            ),
+                            labelStyle: const TextStyle(color: Colors.white),
+                          ),
+                          onChanged: (value) {
+                            _convertCurrency();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField2<String>(
+                          value: _fromCurrency,
+                          items: _currencies.map((currency) {
+                            return DropdownMenuItem<String>(
+                              value: currency['code'],
+                              child: Text(
+                                  '${currency['code']} - ${currency['name']}'),
+                            );
+                          }).toList(),
+                          onChanged: (String? newValue) {
+                            setState(() {
+                              _fromCurrency = newValue!;
+                              if (_amountController.text.isNotEmpty)
+                                _convertCurrency();
+                            });
+                          },
+                          decoration: InputDecoration(
+                            labelText: "From",
+                            labelStyle: TextStyle(color: Colors.white),
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 15, vertical: 10),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(16)),
+                              borderSide: BorderSide(color: Colors.white),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(16)),
+                              borderSide: BorderSide(color: Colors.white),
+                            ),
+                          ),
+                          iconStyleData: const IconStyleData(
+                            icon: Icon(Icons.keyboard_arrow_down_rounded),
+                            iconSize: 36,
+                            iconEnabledColor: Colors.white,
+                          ),
+                          selectedItemBuilder: (BuildContext context) {
+                            return _currencies.map<Widget>((currency) {
+                              return Text(
+                                currency['code']!,
+                                style: TextStyle(color: Colors.white),
+                              );
+                            }).toList();
+                          },
+                          dropdownStyleData: DropdownStyleData(
+                            width: double.infinity,
+                            isFullScreen: true,
+                          ),
+                          dropdownSearchData: DropdownSearchData(
+                            searchController: _fromCurrencySearchController,
+                            searchInnerWidget: Container(
+                              margin: EdgeInsets.all(16),
+                              child: TextField(
+                                controller: _fromCurrencySearchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Search currencies...',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            searchInnerWidgetHeight: 60.0,
+                            searchMatchFn: (item, searchValue) {
+                              return (item.value as String)
+                                  .toLowerCase()
+                                  .contains(searchValue.toLowerCase());
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.white),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: _isLoading
+                              ? Center(
+                                  child: CircularProgressIndicator(
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white),
+                                  ),
+                                )
+                              : Text(
+                                  _convertedAmount.isEmpty
+                                      ? '0.00'
+                                      : _convertedAmount,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField2<String>(
+                          value: _toCurrency,
+                          items: _currencies.map((currency) {
+                            return DropdownMenuItem<String>(
+                              value: currency['code'],
+                              child: Text(
+                                  '${currency['code']} - ${currency['name']}'),
+                            );
+                          }).toList(),
+                          onChanged: (String? newValue) {
+                            setState(() {
+                              _toCurrency = newValue!;
+                              if (_amountController.text.isNotEmpty)
+                                _convertCurrency();
+                            });
+                          },
+                          decoration: InputDecoration(
+                            labelText: "To",
+                            labelStyle: TextStyle(color: Colors.white),
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 15, vertical: 10),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(16)),
+                              borderSide: BorderSide(color: Colors.white),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(16)),
+                              borderSide: BorderSide(color: Colors.white),
+                            ),
+                          ),
+                          iconStyleData: const IconStyleData(
+                            icon: Icon(Icons.keyboard_arrow_down_rounded),
+                            iconSize: 36,
+                            iconEnabledColor: Colors.white,
+                          ),
+                          selectedItemBuilder: (BuildContext context) {
+                            return _currencies.map<Widget>((currency) {
+                              return Text(
+                                currency['code']!,
+                                style: TextStyle(color: Colors.white),
+                              );
+                            }).toList();
+                          },
+                          dropdownStyleData: DropdownStyleData(
+                            width: double.infinity,
+                            isFullScreen: true,
+                          ),
+                          dropdownSearchData: DropdownSearchData(
+                            searchController: _toCurrencySearchController,
+                            searchInnerWidget: Container(
+                              margin: EdgeInsets.all(16),
+                              child: TextField(
+                                controller: _toCurrencySearchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Search currencies...',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            searchInnerWidgetHeight: 60.0,
+                            searchMatchFn: (item, searchValue) {
+                              return (item.value as String)
+                                  .toLowerCase()
+                                  .contains(searchValue.toLowerCase());
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_convertedAmount.isNotEmpty &&
+                      (_convertedAmount.contains('error') ||
+                          _convertedAmount.contains('Failed') ||
+                          _convertedAmount.contains('required') ||
+                          _convertedAmount.contains('Invalid') ||
+                          _convertedAmount.contains('greater')))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        _convertedAmount,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  // --- End Currency Converter UI ---
                 ],
               ),
             ),

@@ -287,9 +287,6 @@ class _AddCategoryPageState extends State<AddCategoryPage>
         context: context,
         task: () async {
           if (selectedIcon != null && categoryNameController.text.isNotEmpty) {
-            SharedPreferences prefs = await SharedPreferences.getInstance();
-            String? email = prefs.getString('email');
-
             // Validate sales tax percentage
             double finalSalesTaxPercentage = 0.0;
             if (isSalesTaxApplicable) {
@@ -314,36 +311,50 @@ class _AddCategoryPageState extends State<AddCategoryPage>
               }
             }
 
-            // Create category data with sales tax information
+            // Create category data as GLOBAL category (not user-specific)
             final categoryData = {
               'iconName': selectedIconName,
               'iconColor': _colorToHex(selectedIconColor),
               'name': categoryNameController.text,
-              'email': email,
               'salesTaxApplicable': isSalesTaxApplicable,
               'salesTaxPercentage': finalSalesTaxPercentage,
               'salesTaxRate': finalSalesTaxPercentage /
                   100, // Store as decimal for calculations
-              'createdAt': FieldValue.serverTimestamp(),
-              'isCustomCategory': true, // Mark as custom admin category
+              'created_at': FieldValue
+                  .serverTimestamp(), // Match the field name from CategoriesService
+              'is_default':
+                  false, // This is a custom global category, not a default one
+              'is_custom':
+                  true, // Mark as custom category created by admin/user
             };
 
-            // Store in Firestore
-            await FirebaseFirestore.instance
-                .collection('categories')
-                .add(categoryData);
+            try {
+              // Store in global_categories collection (not categories collection)
+              await FirebaseFirestore.instance
+                  .collection(
+                      'global_categories') // Changed from 'categories' to 'global_categories'
+                  .add(categoryData);
 
-            // Show success message
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Category "${categoryNameController.text}" created successfully!',
+              // Show success message
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Global category "${categoryNameController.text}" created successfully!',
+                  ),
+                  backgroundColor: Colors.green,
                 ),
-                backgroundColor: Colors.green,
-              ),
-            );
+              );
 
-            Navigator.pop(context);
+              Navigator.pop(context);
+            } catch (e) {
+              // Show error message
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Error creating category: $e'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -462,7 +473,7 @@ class _AddCategoryPageState extends State<AddCategoryPage>
           },
         ),
         title: const Text(
-          'Create New Category',
+          'Create Global Category',
           style: TextStyle(
             color: Colors.black,
             fontSize: 28,
@@ -475,11 +486,20 @@ class _AddCategoryPageState extends State<AddCategoryPage>
         children: [
           const SizedBox(height: 16),
           const Text(
-            'How your category looks like?',
+            'How your global category looks like?',
             style: TextStyle(
               color: Colors.black87,
               fontSize: 18,
               fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This category will be available to all users.',
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+              fontStyle: FontStyle.italic,
             ),
           ),
           const SizedBox(height: 24),
@@ -757,12 +777,35 @@ class _AddCategoryPageState extends State<AddCategoryPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Preview',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
+                  Row(
+                    children: [
+                      const Text(
+                        'Preview',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border:
+                              Border.all(color: Colors.blue.withOpacity(0.3)),
+                        ),
+                        child: const Text(
+                          'GLOBAL',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -827,7 +870,7 @@ class _AddCategoryPageState extends State<AddCategoryPage>
                 ),
               ),
               child: const Text(
-                'Create Category',
+                'Create Global Category',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,

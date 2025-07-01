@@ -6,6 +6,7 @@ import 'package:ExpenseTracker/widgets/custom_loader.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'package:ExpenseTracker/Services/CategoriesService.dart';
+import 'package:ExpenseTracker/screens/BudgetPage.dart';
 
 class AddBudgetPage extends StatefulWidget {
   const AddBudgetPage({super.key});
@@ -214,7 +215,12 @@ class _AddBudgetPageState extends State<AddBudgetPage>
               }
             }
 
-            Navigator.pop(context); // Go back after successful save
+            // Navigate to BudgetPage after successful save
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (context) => const BudgetPage()),
+              (route) => false,
+            );
           } catch (e) {
             ScaffoldMessenger.of(context)
                 .showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -286,10 +292,17 @@ class _AddBudgetPageState extends State<AddBudgetPage>
                           border: InputBorder.none,
                           prefixIcon: Container(
                             margin: const EdgeInsets.only(right: 8),
-                            child: const Icon(
-                              Icons.currency_exchange,
-                              color: Colors.white,
-                              size: 40,
+                            // Replace the currency icon with PKR text
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 8.0),
+                              child: Text(
+                                'PKR',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ),
                           hintText: '0',
@@ -327,158 +340,167 @@ class _AddBudgetPageState extends State<AddBudgetPage>
                             child: Column(
                               children: [
                                 const SizedBox(height: 16),
-                                DropdownButtonFormField2<Map<String, dynamic>>(
-                                  decoration: InputDecoration(
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.zero,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
+                                // Fix: Wrap DropdownButtonFormField2 with SizedBox for constraints
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: DropdownButtonFormField2<
+                                      Map<String, dynamic>>(
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(16.0),
+                                        borderSide: const BorderSide(
+                                            color: Color(0xFFF1F1FA), width: 1),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(16.0),
+                                        borderSide: const BorderSide(
+                                            color: Color(0xFFF1F1FA), width: 1),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(16.0),
+                                        borderSide: const BorderSide(
+                                            color:
+                                                Color.fromRGBO(127, 61, 255, 1),
+                                            width: 1),
+                                      ),
                                     ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
+                                    buttonStyleData: ButtonStyleData(
+                                      height: 60,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(16),
+                                        color: const Color(0xFFF1F1FA),
+                                      ),
                                     ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                          color:
-                                              Color.fromRGBO(127, 61, 255, 1),
-                                          width: 1),
+                                    iconStyleData: const IconStyleData(
+                                      icon: Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                        color: Colors.black54,
+                                      ),
+                                      iconSize: 24,
                                     ),
-                                  ),
-                                  buttonStyleData: ButtonStyleData(
-                                    height: 60,
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(16),
-                                      color: const Color(0xFFF1F1FA),
+                                    dropdownStyleData: DropdownStyleData(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(16),
+                                        color: Colors.white,
+                                      ),
+                                      offset: const Offset(0, -10),
+                                      scrollbarTheme: ScrollbarThemeData(
+                                        radius: const Radius.circular(40),
+                                        thickness: WidgetStateProperty.all(6),
+                                        thumbVisibility:
+                                            WidgetStateProperty.all(true),
+                                      ),
                                     ),
-                                  ),
-                                  iconStyleData: const IconStyleData(
-                                    icon: Icon(
-                                      Icons.keyboard_arrow_down_rounded,
-                                      color: Colors.black54,
+                                    menuItemStyleData: const MenuItemStyleData(
+                                      height: 50,
+                                      padding:
+                                          EdgeInsets.symmetric(horizontal: 16),
                                     ),
-                                    iconSize: 24,
-                                  ),
-                                  dropdownStyleData: DropdownStyleData(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(16),
-                                      color: Colors.white,
-                                    ),
-                                    offset: const Offset(0, -10),
-                                    scrollbarTheme: ScrollbarThemeData(
-                                      radius: const Radius.circular(40),
-                                      thickness: WidgetStateProperty.all(6),
-                                      thumbVisibility:
-                                          WidgetStateProperty.all(true),
-                                    ),
-                                  ),
-                                  menuItemStyleData: const MenuItemStyleData(
-                                    height: 50,
-                                    padding:
-                                        EdgeInsets.symmetric(horizontal: 16),
-                                  ),
-                                  items: categories
-                                      .map((Map<String, dynamic> category) {
-                                    return DropdownMenuItem<
-                                        Map<String, dynamic>>(
-                                      value: category,
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 40,
-                                            height: 40,
-                                            decoration: BoxDecoration(
-                                              color: Color(int.parse(
-                                                      category['iconColor']
-                                                          .replaceFirst(
-                                                              '#', '0xFF')))
-                                                  .withOpacity(0.1),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Icon(
-                                              getIconData(category['iconName']),
-                                              color: Color(int.parse(
-                                                  category['iconColor']
-                                                      .replaceFirst(
-                                                          '#', '0xFF'))),
-                                              size: 20,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              category['name'],
-                                              style: const TextStyle(
-                                                fontSize: 16,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                          ),
-                                          if (category['is_global'] ?? false)
+                                    items: categories
+                                        .map((Map<String, dynamic> category) {
+                                      return DropdownMenuItem<
+                                          Map<String, dynamic>>(
+                                        value: category,
+                                        child: Row(
+                                          children: [
                                             Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2),
+                                              width: 40,
+                                              height: 40,
                                               decoration: BoxDecoration(
-                                                color: Colors.blue
+                                                color: Color(int.parse(
+                                                        category['iconColor']
+                                                            .replaceFirst(
+                                                                '#', '0xFF')))
                                                     .withOpacity(0.1),
                                                 borderRadius:
-                                                    BorderRadius.circular(8),
+                                                    BorderRadius.circular(12),
                                               ),
-                                              child: const Text(
-                                                'Global',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.blue,
-                                                  fontWeight: FontWeight.w500,
+                                              child: Icon(
+                                                getIconData(
+                                                    category['iconName']),
+                                                color: Color(int.parse(
+                                                    category['iconColor']
+                                                        .replaceFirst(
+                                                            '#', '0xFF'))),
+                                                size: 20,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(
+                                                category['name'],
+                                                style: const TextStyle(
+                                                  fontSize: 16,
+                                                  color: Colors.black87,
                                                 ),
                                               ),
                                             ),
-                                        ],
-                                      ),
-                                    );
-                                  }).toList(),
-                                  value: selectedCategory,
-                                  onChanged: (Map<String, dynamic>? value) {
-                                    setState(() {
-                                      selectedCategory = value;
-                                    });
-                                  },
-                                  hint: Row(
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          color: const Color.fromRGBO(
-                                              127, 61, 255, 0.1),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                            if (category['is_global'] ?? false)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue
+                                                      .withOpacity(0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: const Text(
+                                                  'Global',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: Colors.blue,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
                                         ),
-                                        child: const Icon(
-                                          Icons.category,
-                                          size: 20,
-                                          color:
-                                              Color.fromRGBO(127, 61, 255, 1),
+                                      );
+                                    }).toList(),
+                                    value: selectedCategory,
+                                    onChanged: (Map<String, dynamic>? value) {
+                                      setState(() {
+                                        selectedCategory = value;
+                                      });
+                                    },
+                                    hint: Row(
+                                      children: [
+                                        Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            color: const Color.fromRGBO(
+                                                127, 61, 255, 0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          child: const Icon(
+                                            Icons.category,
+                                            size: 20,
+                                            color:
+                                                Color.fromRGBO(127, 61, 255, 1),
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      const Text(
-                                        'Select Category',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          color: Colors.black54,
+                                        const SizedBox(width: 12),
+                                        const Text(
+                                          'Select Category',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: Colors.black54,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 20),
