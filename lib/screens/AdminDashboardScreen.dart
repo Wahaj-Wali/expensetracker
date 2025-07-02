@@ -67,55 +67,201 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
-  void _showUserDetails(String userType) {
-    final totalUsers = dashboardData['totalUsers'] ?? 0;
-    final activeUsers = dashboardData['activeUsers'] ?? 0;
-    final userTypesDistribution =
-        dashboardData['userTypesDistribution'] as Map<String, int>? ?? {};
-    final platformUsageStats =
-        dashboardData['platformUsageStats'] as Map<String, int>? ?? {};
+  void _showUserDetails(String userType) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text("Loading user details..."),
+            ],
+          ),
+        );
+      },
+    );
 
+    try {
+      List<Map<String, dynamic>> users = [];
+
+      if (userType == 'Total Users') {
+        users = await _adminStatsService.getUserDetails();
+      } else if (userType == 'Active Users') {
+        users = await _adminStatsService.getActiveUsersDetails();
+      }
+
+      Navigator.of(context).pop();
+      _showUserListDialog(userType, users);
+    } catch (e) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading user details: $e')),
+      );
+    }
+  }
+
+  void _showUserListDialog(String title, List<Map<String, dynamic>> users) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('$userType Details'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (userType == 'Total Users') ...[
-                  Text('Total Users: $totalUsers'),
-                  const SizedBox(height: 16),
-                  const Text('User Types:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  ...userTypesDistribution.entries.map((entry) => Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 4),
-                        child: Text('${entry.key}: ${entry.value}'),
-                      )),
-                  const SizedBox(height: 16),
-                  const Text('Platform Usage:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  ...platformUsageStats.entries.map((entry) => Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 4),
-                        child: Text('${entry.key}: ${entry.value}'),
-                      )),
-                ] else if (userType == 'Active Users') ...[
-                  Text('Active Users (Last 30 days): $activeUsers'),
-                  const SizedBox(height: 16),
-                  Text(
-                      'Activity Rate: ${totalUsers > 0 ? ((activeUsers / totalUsers) * 100).toStringAsFixed(1) : 0}%'),
-                  const SizedBox(height: 8),
-                  Text('Inactive Users: ${totalUsers - activeUsers}'),
-                ],
-              ],
-            ),
+          title: Row(
+            children: [
+              Icon(
+                title == 'Total Users' ? Icons.people : Icons.people_alt,
+                color: const Color.fromRGBO(127, 61, 255, 1),
+              ),
+              const SizedBox(width: 8),
+              Text(title),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: users.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.people_outline,
+                            size: 48, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          'No users found',
+                          style: TextStyle(color: Colors.grey, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(127, 61, 255, 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              title == 'Total Users'
+                                  ? Icons.people
+                                  : Icons.people_alt,
+                              color: const Color.fromRGBO(127, 61, 255, 1),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${users.length} ${title.toLowerCase()}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Color.fromRGBO(127, 61, 255, 1),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: users.length,
+                          itemBuilder: (context, index) {
+                            final user = users[index];
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              elevation: 2,
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor:
+                                      const Color.fromRGBO(0, 168, 107, 1),
+                                  child: Text(
+                                    user['name'].toString().isNotEmpty
+                                        ? user['name'][0].toUpperCase()
+                                        : user['email'][0].toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                title: Text(
+                                  user['name'] != 'Unknown'
+                                      ? user['name']
+                                      : user['email'],
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (user['name'] != 'Unknown')
+                                      Text(
+                                        user['email'],
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          user['signupMethod'] == 'google'
+                                              ? Icons.email
+                                              : Icons.account_circle,
+                                          size: 12,
+                                          color: Colors.grey[500],
+                                        ),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          user['signupMethod'],
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                trailing: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      _formatDate(user['createdAt']),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                    if (user['isActive'] &&
+                                        user['lastActivity'] != null)
+                                      Text(
+                                        'Last: ${_formatDate(user['lastActivity'])}',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: Colors.green[600],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
           ),
           actions: [
-            TextButton(
+            TextButton.icon(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
+              icon: const Icon(Icons.close),
+              label: const Text('Close'),
             ),
           ],
         );
@@ -123,10 +269,27 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      return 'Today';
+    } else if (difference.inDays == 1) {
+      return 'Yesterday';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} days ago';
+    } else if (difference.inDays < 30) {
+      return '${(difference.inDays / 7).floor()} weeks ago';
+    } else {
+      return '${date.day}/${date.month}/${date.year}';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // Match Transactionpage
+      backgroundColor: Colors.white,
       appBar: AppBar(
         automaticallyImplyLeading: false,
         backgroundColor: Colors.white,
@@ -160,7 +323,6 @@ class _AdminDashboardState extends State<AdminDashboard>
       body: TabBarView(
         controller: _tabController,
         children: [
-          // Statistics Tab
           isLoading
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(
@@ -181,7 +343,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                     ),
                   ),
                 ),
-          // Categories Tab
           const CategoriesPage(),
         ],
       ),
@@ -197,7 +358,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
-            color: Colors.black, // Match Transactionpage
+            color: Colors.black,
           ),
         ),
         const SizedBox(height: 16),
@@ -325,21 +486,19 @@ class _AdminDashboardState extends State<AdminDashboard>
       return _buildEmptyChart('No sales tax data available');
     }
 
-    // Get top 8 categories by tax
     final sortedCategories = categoryTaxes.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     final topCategories = sortedCategories.take(8).toList();
 
-    // Use pastel colors for the pie chart
     final colors = [
-      const Color(0xFFB5B9FF), // pastel blue
-      const Color(0xFFFFB5E2), // pastel pink
-      const Color(0xFFB5FFD9), // pastel green
-      const Color(0xFFFFF5B5), // pastel yellow
-      const Color(0xFFFFD6B5), // pastel orange
-      const Color(0xFFFFB5B5), // pastel red
-      const Color(0xFFCBB5FF), // pastel purple
-      const Color(0xFFB5FFF6), // pastel teal
+      const Color(0xFFB5B9FF),
+      const Color(0xFFFFB5E2),
+      const Color(0xFFB5FFD9),
+      const Color(0xFFFFF5B5),
+      const Color(0xFFFFD6B5),
+      const Color(0xFFFFB5B5),
+      const Color(0xFFCBB5FF),
+      const Color(0xFFB5FFF6),
     ];
 
     final totalTax = categoryTaxes.values.fold(0.0, (a, b) => a + b);
