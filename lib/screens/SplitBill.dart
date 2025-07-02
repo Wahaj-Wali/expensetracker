@@ -1,6 +1,7 @@
 import 'package:ExpenseTracker/Services/SplitBillController.dart';
 import 'package:flutter/material.dart';
-
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:ExpenseTracker/screens/AddSplitBillScreen.dart';
 
 class SplitBillOverviewScreen extends StatefulWidget {
@@ -11,15 +12,32 @@ class SplitBillOverviewScreen extends StatefulWidget {
       _SplitBillOverviewScreenState();
 }
 
-class _SplitBillOverviewScreenState extends State<SplitBillOverviewScreen> {
+class _SplitBillOverviewScreenState extends State<SplitBillOverviewScreen>
+    with TickerProviderStateMixin {
   final SplitBillService _splitBillService = SplitBillService();
   List<Map<String, dynamic>> _splitBills = [];
   bool _isLoading = true;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  String _selectedFilter = 'All';
 
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
     _loadSplitBills();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSplitBills() async {
@@ -30,101 +48,678 @@ class _SplitBillOverviewScreenState extends State<SplitBillOverviewScreen> {
         _splitBills = splitBills;
         _isLoading = false;
       });
+      _animationController.forward();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading split bills: $e')),
+        SnackBar(
+          content: Text('Error loading split bills: $e'),
+          backgroundColor: const Color.fromRGBO(253, 60, 74, 1),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       );
       setState(() => _isLoading = false);
     }
   }
 
+  List<Map<String, dynamic>> get _filteredSplitBills {
+    if (_selectedFilter == 'All') return _splitBills;
+    return _splitBills
+        .where((bill) =>
+            bill['status'].toString().toLowerCase() ==
+            _selectedFilter.toLowerCase())
+        .toList();
+  }
+
+  double get _totalPendingAmount {
+    return _splitBills.where((bill) => bill['status'] == 'pending').fold(
+        0.0,
+        (sum, bill) =>
+            sum + (double.tryParse(bill['user_share'].toString()) ?? 0.0));
+  }
+
+  int get _pendingCount {
+    return _splitBills.where((bill) => bill['status'] == 'pending').length;
+  }
+
+  int get _settledCount {
+    return _splitBills.where((bill) => bill['status'] == 'settled').length;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Split Bills'),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadSplitBills,
-              child: _splitBills.isEmpty
-                  ? const Center(
+      child: Scaffold(
+        backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Custom Header with gradient
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      const Color.fromRGBO(127, 61, 255, 1),
+                      const Color.fromRGBO(127, 61, 255, 0.8),
+                    ],
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    // App bar
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                              size: 24,
+                            ),
+                          ),
+                        ),
+                        const Expanded(
+                          child: Text(
+                            'Split Bills',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 40), // Balance the back button
+                      ],
+                    ),
+                    const SizedBox(height: 25),
+
+                    // Stats Cards
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatCard(
+                            'Pending',
+                            _pendingCount.toString(),
+                            'Rs${_totalPendingAmount.toStringAsFixed(2)}',
+                            Icons.pending_actions,
+                            Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(width: 15),
+                        Expanded(
+                          child: _buildStatCard(
+                            'Settled',
+                            _settledCount.toString(),
+                            'Bills',
+                            Icons.check_circle,
+                            const Color.fromRGBO(0, 168, 107, 1),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Filter Tabs
+              Container(
+                color: const Color.fromRGBO(127, 61, 255, 1),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  child: Row(
+                    children: [
+                      _buildFilterTab('All'),
+                      _buildFilterTab('Pending'),
+                      _buildFilterTab('Settled'),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Content Area
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(25),
+                      topRight: Radius.circular(25),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Color.fromRGBO(127, 61, 255, 1),
+                            ),
+                          ),
+                        )
+                      : FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: _filteredSplitBills.isEmpty
+                              ? _buildEmptyState()
+                              : RefreshIndicator(
+                                  onRefresh: _loadSplitBills,
+                                  color: const Color.fromRGBO(127, 61, 255, 1),
+                                  child: ListView.builder(
+                                    padding: const EdgeInsets.all(20),
+                                    itemCount: _filteredSplitBills.length,
+                                    itemBuilder: (context, index) {
+                                      final bill = _filteredSplitBills[index];
+                                      return AnimatedContainer(
+                                        duration: Duration(
+                                          milliseconds: 300 + (index * 100),
+                                        ),
+                                        curve: Curves.easeOutBack,
+                                        child: _buildSplitBillCard(bill, index),
+                                      );
+                                    },
+                                  ),
+                                ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        floatingActionButton: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              colors: [
+                const Color.fromRGBO(127, 61, 255, 1),
+                const Color.fromRGBO(127, 61, 255, 0.8),
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color.fromRGBO(127, 61, 255, 0.4),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: FloatingActionButton.extended(
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AddSplitBillScreen(),
+                ),
+              );
+              _loadSplitBills();
+            },
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            icon: const Icon(Icons.group_add, color: Colors.white, size: 24),
+            label: const Text(
+              'Split Bill',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(
+      String title, String count, String subtitle, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(icon, color: Colors.white, size: 24),
+              Text(
+                count,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterTab(String title) {
+    bool isSelected = _selectedFilter == title;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _selectedFilter = title;
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.all(4),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isSelected
+                  ? const Color.fromRGBO(127, 61, 255, 1)
+                  : Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color.fromRGBO(127, 61, 255, 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.group_outlined,
+              size: 64,
+              color: Color.fromRGBO(127, 61, 255, 1),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'No Split Bills Yet',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _selectedFilter == 'All'
+                ? 'Start splitting expenses with friends!'
+                : 'No ${_selectedFilter.toLowerCase()} bills found',
+            style: const TextStyle(
+              fontSize: 16,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 32),
+          if (_selectedFilter == 'All')
+            ElevatedButton.icon(
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const AddSplitBillScreen(),
+                  ),
+                );
+                _loadSplitBills();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Create Split Bill'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSplitBillCard(Map<String, dynamic> bill, int index) {
+    bool isPending = bill['status'] == 'pending';
+    double userShare = double.tryParse(bill['user_share'].toString()) ?? 0.0;
+    double totalAmount =
+        double.tryParse(bill['total_amount'].toString()) ?? 0.0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            spreadRadius: 0,
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(
+          color: isPending
+              ? Colors.orange.withOpacity(0.3)
+              : const Color.fromRGBO(0, 168, 107, 0.3),
+          width: 1,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () async {
+            if (isPending) {
+              bool? shouldSettle = await _showSettleDialog();
+              if (shouldSettle == true) {
+                await _splitBillService.markSplitBillAsSettled(
+                  bill['split_bill_id'],
+                );
+                _loadSplitBills();
+              }
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(127, 61, 255, 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.group,
+                        color: Color.fromRGBO(127, 61, 255, 1),
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
                       child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.group_outlined,
-                              size: 48, color: Colors.grey),
-                          SizedBox(height: 16),
-                          Text('No split bills yet',
-                              style: TextStyle(color: Colors.grey)),
+                          Text(
+                            bill['description'] ?? 'No description',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Created ${_formatDate(bill['created_at'])}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey,
+                            ),
+                          ),
                         ],
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: _splitBills.length,
-                      itemBuilder: (context, index) {
-                        final bill = _splitBills[index];
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          child: ListTile(
-                            title:
-                                Text(bill['description'] ?? 'No description'),
-                            subtitle: Text(
-                                'Total: \$${bill['total_amount']}\nYour share: \$${bill['user_share']}'),
-                            trailing: Chip(
-                              label: Text(bill['status']),
-                              backgroundColor: bill['status'] == 'settled'
-                                  ? Colors.green[100]
-                                  : Colors.orange[100],
-                            ),
-                            onTap: () async {
-                              if (bill['status'] == 'pending') {
-                                bool? shouldSettle = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Mark as Settled?'),
-                                    content: const Text(
-                                        'Has everyone paid their share?'),
-                                    actions: [
-                                      TextButton(
-                                        child: const Text('Cancel'),
-                                        onPressed: () =>
-                                            Navigator.pop(context, false),
-                                      ),
-                                      TextButton(
-                                        child: const Text('Yes, Mark Settled'),
-                                        onPressed: () =>
-                                            Navigator.pop(context, true),
-                                      ),
-                                    ],
-                                  ),
-                                );
-
-                                if (shouldSettle == true) {
-                                  await _splitBillService
-                                      .markSplitBillAsSettled(
-                                          bill['split_bill_id']);
-                                  _loadSplitBills();
-                                }
-                              }
-                            },
-                          ),
-                        );
-                      },
                     ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isPending
+                            ? Colors.orange.withOpacity(0.1)
+                            : const Color.fromRGBO(0, 168, 107, 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isPending
+                              ? Colors.orange
+                              : const Color.fromRGBO(0, 168, 107, 1),
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        bill['status'].toString().toUpperCase(),
+                        style: TextStyle(
+                          color: isPending
+                              ? Colors.orange
+                              : const Color.fromRGBO(0, 168, 107, 1),
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Total Amount',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Rs${totalAmount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.grey.withOpacity(0.3),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text(
+                              'Your Share',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Rs${userShare.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: isPending
+                                    ? Colors.orange
+                                    : const Color.fromRGBO(0, 168, 107, 1),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isPending) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.orange.withOpacity(0.3),
+                      ),
+                    ),
+                    child: const Text(
+                      '💰 Tap to mark as settled',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const AddSplitBillScreen()),
-          );
-          _loadSplitBills(); // Refresh the list after returning
-        },
-        icon: const Icon(Icons.group_add),
-        label: const Text('Split Bill'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(dynamic timestamp) {
+    try {
+      DateTime date;
+      if (timestamp is String) {
+        date = DateTime.parse(timestamp);
+      } else {
+        date = timestamp.toDate();
+      }
+      return DateFormat('MMM d, yyyy').format(date);
+    } catch (e) {
+      return 'Unknown date';
+    }
+  }
+
+  Future<bool?> _showSettleDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color.fromRGBO(0, 168, 107, 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.check_circle,
+                color: Color.fromRGBO(0, 168, 107, 1),
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Mark as Settled?',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Has everyone paid their share of this bill?',
+          style: TextStyle(fontSize: 16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Colors.grey,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color.fromRGBO(0, 168, 107, 1),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Yes, Mark Settled',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }
