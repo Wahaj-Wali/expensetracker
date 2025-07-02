@@ -33,16 +33,18 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
   @override
   void initState() {
     super.initState();
-    // Always include Income, Expense, and Split Bills
+    // Initialize with base transaction types
     selectedFilters = {
       'Income': false,
       'Expense': false,
       'Split Bills': false,
     };
-    // If initialFilters provided, override defaults
+
+    // Apply initial filters if provided
     if (widget.initialFilters != null) {
       selectedFilters.addAll(widget.initialFilters!);
     }
+
     fetchCategories();
   }
 
@@ -57,10 +59,9 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
       List<String> globalCategories =
           globalSnapshot.docs.map((doc) => doc['name'] as String).toList();
 
-      Set<String> allCategories = {...globalCategories};
-
       setState(() {
-        categories = allCategories.toList()..sort();
+        categories = globalCategories;
+
         // Add dynamic categories to filter map if not present
         for (var category in categories) {
           if (!selectedFilters.containsKey(category)) {
@@ -87,6 +88,7 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
   @override
   Widget build(BuildContext context) {
     return Container(
+      height: MediaQuery.of(context).size.height * 0.8,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -102,114 +104,118 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
           ),
         ],
       ),
-      child: Stack(
+      child: Column(
         children: [
-          SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 50,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(10),
+          // Handle bar
+          Container(
+            width: 50,
+            height: 4,
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+
+          // Header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Filter Transactions',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    selectedFilters.updateAll((key, value) => false);
+                  });
+                },
+                child: Container(
+                  width: 80,
+                  height: 30,
+                  decoration: BoxDecoration(
+                      color: const Color.fromRGBO(126, 61, 255, 0.352),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Center(
+                    child: Text(
+                      'Reset',
+                      style: TextStyle(
+                        color: Color.fromRGBO(127, 61, 255, 1),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Filter Transactions',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          selectedFilters.updateAll((key, value) => false);
-                        });
-                      },
-                      child: Container(
-                        width: 80,
-                        height: 30,
-                        decoration: BoxDecoration(
-                            color: const Color.fromRGBO(126, 61, 255, 0.352),
-                            borderRadius: BorderRadius.circular(10)),
-                        child: const Center(
-                          child: Text(
-                            'Reset',
-                            style: TextStyle(
-                              color: Color.fromRGBO(127, 61, 255, 1),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                _buildSectionHeader('Transaction Type'),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8.0,
-                  runSpacing: 8.0,
-                  children: [
-                    _buildFilterChip('Income'),
-                    _buildFilterChip('Expense'),
-                    _buildFilterChip('Split Bills'),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                _buildSectionHeader('Categories'),
-                const SizedBox(height: 8),
-                if (isLoading)
-                  const Center(child: CircularProgressIndicator())
-                else if (categories.isEmpty)
-                  const Text(
-                    'No categories available',
-                    style: TextStyle(color: Colors.grey),
-                  )
-                else
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Content
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSectionHeader('Transaction Type'),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 8.0,
                     runSpacing: 8.0,
-                    children: categories
-                        .map((category) => _buildFilterChip(category))
-                        .toList(),
+                    children: [
+                      _buildFilterChip('Income'),
+                      _buildFilterChip('Expense'),
+                      _buildFilterChip('Split Bills'),
+                    ],
                   ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
+                  const SizedBox(height: 20),
+                  _buildSectionHeader('Categories'),
+                  const SizedBox(height: 8),
+                  if (isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (categories.isEmpty)
                     const Text(
-                      'Filters Selected',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                      'No categories available',
+                      style: TextStyle(color: Colors.grey),
+                    )
+                  else
+                    Wrap(
+                      spacing: 8.0,
+                      runSpacing: 8.0,
+                      children: categories
+                          .map((category) => _buildFilterChip(category))
+                          .toList(),
                     ),
-                    Text(
-                      '${selectedFilters.values.where((isSelected) => isSelected).length} Selected',
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                ),
-                const SizedBox(
-                    height: 100), // Add spacing to avoid button overlap
-              ],
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Filters Selected',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w500),
+                      ),
+                      Text(
+                        '${selectedFilters.values.where((isSelected) => isSelected).length} Selected',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-          Positioned(
-            bottom: 35,
-            left: 0,
-            right: 0,
+
+          // Apply button
+          Padding(
+            padding: const EdgeInsets.only(top: 20),
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
@@ -334,7 +340,7 @@ class _TransactionpageState extends State<Transactionpage> {
   Map<String, bool> selectedFilters = {
     'Income': false,
     'Expense': false,
-    'Split Bills': false, // Ensure Split Bills is always present
+    'Split Bills': false,
   };
 
   final Map<String, IconData> _flutterIcons = {
@@ -343,67 +349,31 @@ class _TransactionpageState extends State<Transactionpage> {
     'Fastfood': Icons.fastfood,
     'Cafe': Icons.local_cafe,
     'Cake': Icons.cake,
-
-    // Transportation
     'Car': Icons.directions_car,
     'Bus': Icons.directions_bus,
     'Bike': Icons.directions_bike,
     'Taxi': Icons.local_taxi,
-
-    // Utilities
     'Plumbing': Icons.plumbing,
-
-    // Entertainment
     'Movie': Icons.movie,
     'M': Icons.music_note,
     'Games': Icons.sports_esports,
     'Ticket': Icons.local_movies,
-
-    // Shopping
     'Groceries': Icons.shopping_cart,
     'Clothing': Icons.local_mall,
-
-    // Health and Fitness
     'Gym': Icons.fitness_center,
     'Hospital': Icons.local_hospital,
     'Pharmacy': Icons.local_pharmacy,
     'FirstAid': Icons.healing,
-
-    // Home and Rent
     'Rent': Icons.home,
     'Apartment': Icons.apartment,
     'Kitchen': Icons.kitchen,
     'Furniture': Icons.weekend,
-    // Add more icons as needed
   };
 
   String id = "";
-  late SalesTaxController
-      _salesTaxController; // Add SalesTaxController instance
-
+  late SalesTaxController _salesTaxController;
   late Future<List<Transaction>> _transactionListFuture;
-
-  DateTime? selectedDate; // Add this for calendar support
-
-  @override
-  void initState() {
-    super.initState();
-    _salesTaxController = SalesTaxController(); // Initialize the controller
-
-    // Set selectedMonth to current month
-    final now = DateTime.now();
-    selectedMonth = months[now.month - 1];
-    selectedDate = null; // No date filter by default
-
-    // Apply initial filter if provided
-    if (widget.initialFilter != null) {
-      selectedFilters[widget.initialFilter!] = true;
-      selectedFiltersCount = 1;
-    }
-
-    _transactionListFuture =
-        fetchTransactions(filters: selectedFilters, month: selectedMonth);
-  }
+  DateTime? selectedDate;
 
   final List<String> months = [
     'January',
@@ -420,6 +390,26 @@ class _TransactionpageState extends State<Transactionpage> {
     'December',
   ];
   String? selectedMonth;
+
+  @override
+  void initState() {
+    super.initState();
+    _salesTaxController = SalesTaxController();
+
+    // Set selectedMonth to current month
+    final now = DateTime.now();
+    selectedMonth = months[now.month - 1];
+    selectedDate = null;
+
+    // Apply initial filter if provided
+    if (widget.initialFilter != null) {
+      selectedFilters[widget.initialFilter!] = true;
+      selectedFiltersCount = 1;
+    }
+
+    _transactionListFuture =
+        fetchTransactions(filters: selectedFilters, month: selectedMonth);
+  }
 
   Future<List<Transaction>> fetchTransactions(
       {Map<String, bool>? filters, String? month, DateTime? date}) async {
@@ -438,10 +428,13 @@ class _TransactionpageState extends State<Transactionpage> {
           FirebaseFirestore.instance.collection('split_bills');
       CollectionReference globalCategoriesRef =
           FirebaseFirestore.instance.collection('global_categories');
+      // Remove userCategoriesRef, not needed for filtering
+      // CollectionReference userCategoriesRef =
+      //     FirebaseFirestore.instance.collection('user_categories');
 
       Query query = transactionsRef.where('email', isEqualTo: email);
 
-      // Apply filter conditions based on the selected filters
+      // Apply filter conditions - FIXED LOGIC
       if (filters != null && filters.containsValue(true)) {
         List<String> transactionTypes = [];
         List<String> categories = [];
@@ -459,277 +452,364 @@ class _TransactionpageState extends State<Transactionpage> {
           }
         });
 
-        // Only filter by is_split_bill if Split Bills is toggled
+        // Build query conditions
+        List<Query> queries = [];
+
+        // If Split Bills is selected (even if it's the only filter)
         if (includeSplitBills) {
-          if (transactionTypes.isEmpty && categories.isEmpty) {
-            query = query.where('is_split_bill', isEqualTo: true);
+          Query splitQuery = transactionsRef
+              .where('email', isEqualTo: email)
+              .where('is_split_bill', isEqualTo: true);
+
+          // Apply date/month filter to split query
+          if (date != null) {
+            DateTime startOfDay =
+                DateTime(date.year, date.month, date.day, 0, 0, 0, 0);
+            DateTime endOfDay =
+                DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+            splitQuery = splitQuery
+                .where('timestamp',
+                    isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+                .where('timestamp',
+                    isLessThanOrEqualTo: Timestamp.fromDate(endOfDay));
+          } else if (month != null && month.isNotEmpty) {
+            int monthIndex = _getMonthIndex(month);
+            int currentYear = DateTime.now().year;
+            DateTime startOfMonth = DateTime(currentYear, monthIndex, 1);
+            DateTime endOfMonth =
+                DateTime(currentYear, monthIndex + 1, 0, 23, 59, 59, 999);
+            splitQuery = splitQuery
+                .where('timestamp',
+                    isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+                .where('timestamp',
+                    isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth));
           }
-          // else: do not filter by is_split_bill, include all
-        } else {
-          query = query.where('is_split_bill', isEqualTo: false);
+
+          queries.add(splitQuery);
         }
 
-        if (transactionTypes.isNotEmpty) {
-          query = query.where('transaction_type', whereIn: transactionTypes);
+        // If transaction types or categories are selected
+        if (transactionTypes.isNotEmpty || categories.isNotEmpty) {
+          Query regularQuery = transactionsRef
+              .where('email', isEqualTo: email)
+              .where('is_split_bill', isEqualTo: false);
+
+          if (transactionTypes.isNotEmpty) {
+            regularQuery = regularQuery.where('transaction_type',
+                whereIn: transactionTypes);
+          }
+
+          // Only use global categories for filtering
+          if (categories.isNotEmpty) {
+            regularQuery =
+                regularQuery.where('category_name', whereIn: categories);
+          }
+
+          // Apply date/month filter to regular query
+          if (date != null) {
+            DateTime startOfDay =
+                DateTime(date.year, date.month, date.day, 0, 0, 0, 0);
+            DateTime endOfDay =
+                DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+            regularQuery = regularQuery
+                .where('timestamp',
+                    isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+                .where('timestamp',
+                    isLessThanOrEqualTo: Timestamp.fromDate(endOfDay));
+          } else if (month != null && month.isNotEmpty) {
+            int monthIndex = _getMonthIndex(month);
+            int currentYear = DateTime.now().year;
+            DateTime startOfMonth = DateTime(currentYear, monthIndex, 1);
+            DateTime endOfMonth =
+                DateTime(currentYear, monthIndex + 1, 0, 23, 59, 59, 999);
+            regularQuery = regularQuery
+                .where('timestamp',
+                    isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+                .where('timestamp',
+                    isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth));
+          }
+
+          queries.add(regularQuery);
         }
 
-        if (categories.isNotEmpty) {
-          query = query.where('category_name', whereIn: categories);
-        }
-      }
-      // else: no filters, include all transactions (including split bills)
+        // If only Split Bills is selected, queries will only have splitQuery
+        // If both are selected, both queries will be run
 
-      // Add date-based filtering (overrides month if set)
-      if (date != null) {
-        DateTime startOfDay =
-            DateTime(date.year, date.month, date.day, 0, 0, 0, 0);
-        DateTime endOfDay =
-            DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
-        Timestamp startTimestamp = Timestamp.fromDate(startOfDay);
-        Timestamp endTimestamp = Timestamp.fromDate(endOfDay);
-        query = query
-            .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
-            .where('timestamp', isLessThanOrEqualTo: endTimestamp);
-      } else if (month != null && month.isNotEmpty) {
-        try {
+        // Execute queries and combine results
+        List<QueryDocumentSnapshot> allDocs = [];
+        for (Query q in queries) {
+          QuerySnapshot snapshot =
+              await q.orderBy('timestamp', descending: true).get();
+          allDocs.addAll(snapshot.docs);
+        }
+
+        // Remove duplicates based on document ID
+        Map<String, QueryDocumentSnapshot> uniqueDocs = {};
+        for (var doc in allDocs) {
+          uniqueDocs[doc.id] = doc;
+        }
+
+        allDocs = uniqueDocs.values.toList();
+
+        // Sort by timestamp
+        allDocs.sort((a, b) {
+          Timestamp aTime = (a.data() as Map<String, dynamic>)['timestamp'] ??
+              Timestamp.now();
+          Timestamp bTime = (b.data() as Map<String, dynamic>)['timestamp'] ??
+              Timestamp.now();
+          return bTime.compareTo(aTime);
+        });
+
+        return await _processTransactionDocs(allDocs, splitBillsRef,
+            globalCategoriesRef, null /* userCategoriesRef not needed */);
+      } else {
+        // No filters - get all transactions
+        // Apply date/month filter
+        if (date != null) {
+          DateTime startOfDay =
+              DateTime(date.year, date.month, date.day, 0, 0, 0, 0);
+          DateTime endOfDay =
+              DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+          query = query
+              .where('timestamp',
+                  isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+              .where('timestamp',
+                  isLessThanOrEqualTo: Timestamp.fromDate(endOfDay));
+        } else if (month != null && month.isNotEmpty) {
           int monthIndex = _getMonthIndex(month);
           int currentYear = DateTime.now().year;
           DateTime startOfMonth = DateTime(currentYear, monthIndex, 1);
           DateTime endOfMonth =
               DateTime(currentYear, monthIndex + 1, 0, 23, 59, 59, 999);
-          Timestamp startTimestamp = Timestamp.fromDate(startOfMonth);
-          Timestamp endTimestamp = Timestamp.fromDate(endOfMonth);
-
           query = query
-              .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
-              .where('timestamp', isLessThanOrEqualTo: endTimestamp);
-        } catch (e) {
-          print("Error applying month filter: $e");
-          // Continue without month filter if there's an error
+              .where('timestamp',
+                  isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+              .where('timestamp',
+                  isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth));
         }
+
+        QuerySnapshot querySnapshot =
+            await query.orderBy('timestamp', descending: true).get();
+        return await _processTransactionDocs(querySnapshot.docs, splitBillsRef,
+            globalCategoriesRef, null /* userCategoriesRef not needed */);
       }
-
-      print("Executing Firestore query for user: $email");
-      QuerySnapshot querySnapshot =
-          await query.orderBy('timestamp', descending: true).get();
-      print(
-          "Query executed successfully. Found ${querySnapshot.docs.length} transactions");
-
-      // --- Batch fetch category and split bill data for all transactions ---
-
-      // Collect all category names and split bill IDs
-      Set<String> allCategoryNames = {};
-      Set<String> allSplitBillIds = {};
-      for (var doc in querySnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>?;
-        if (data == null) continue;
-        String? cat = data['category_name']?.toString();
-        if (cat != null && cat.isNotEmpty) allCategoryNames.add(cat);
-        if ((data['is_split_bill'] ?? false) && data['split_bill_id'] != null) {
-          allSplitBillIds.add(data['split_bill_id'].toString());
-        }
-      }
-
-      // Fetch all categories (user and global) in one go
-      List<QuerySnapshot> categorySnaps = await Future.wait([
-        if (allCategoryNames.isNotEmpty)
-          globalCategoriesRef
-              .where('name', whereIn: allCategoryNames.toList())
-              .get(),
-      ]);
-      // Build category lookup map: name -> data
-      Map<String, Map<String, dynamic>> categoryMap = {};
-      for (var snap in categorySnaps) {
-        for (var doc in snap.docs) {
-          final data = doc.data() as Map<String, dynamic>?;
-          if (data != null && data['name'] != null) {
-            categoryMap[data['name'].toString()] = data;
-          }
-        }
-      }
-
-      // Fetch all split bills in one go
-      Map<String, Map<String, dynamic>> splitBillMap = {};
-      if (allSplitBillIds.isNotEmpty) {
-        // Firestore whereIn supports max 10 items, so batch if needed
-        final idsList = allSplitBillIds.toList();
-        for (var i = 0; i < idsList.length; i += 10) {
-          final batchIds = idsList.sublist(
-              i, i + 10 > idsList.length ? idsList.length : i + 10);
-          final snap = await splitBillsRef
-              .where(FieldPath.documentId, whereIn: batchIds)
-              .get();
-          for (var doc in snap.docs) {
-            final data = doc.data() as Map<String, dynamic>?;
-            if (data != null) {
-              splitBillMap[doc.id] = data;
-            }
-          }
-        }
-      }
-
-      List<Transaction> transactionList = [];
-
-      for (var doc in querySnapshot.docs) {
-        try {
-          Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
-
-          if (data == null) {
-            print("Warning: Document \\${doc.id} has null data");
-            continue;
-          }
-
-          // Validate required fields
-          if (!data.containsKey('transaction_id') ||
-              !data.containsKey('transaction_type') ||
-              !data.containsKey('amount')) {
-            print("Warning: Document \\${doc.id} missing required fields");
-            continue;
-          }
-
-          // Skip transactions with no category
-          String categoryName = data['category_name']?.toString() ?? '';
-          if (categoryName.isEmpty) {
-            print("Skipping transaction with no category: \\${doc.id}");
-            continue;
-          }
-
-          String title = categoryName;
-          String description = data['description']?.toString() ?? '';
-          String id = data['transaction_id']?.toString() ?? doc.id;
-          bool isSplitBill = data['is_split_bill'] ?? false;
-          String? splitBillId = data['split_bill_id']?.toString();
-          String transactionType =
-              data['transaction_type']?.toString() ?? 'Expense';
-
-          // Handle amount parsing with better error handling
-          double amountValue = 0.0;
-          try {
-            if (data['amount'] is String) {
-              amountValue = double.tryParse(data['amount']) ?? 0.0;
-            } else if (data['amount'] is num) {
-              amountValue = data['amount'].toDouble();
-            }
-          } catch (e) {
-            print("Error parsing amount for transaction $id: $e");
-            amountValue = 0.0;
-          }
-
-          // Format amount string with currency symbol
-          String amount =
-              '${transactionType == "Income" ? "+" : transactionType == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
-
-          // --- Use splitBillMap for split bill details ---
-          double? totalSplitAmount;
-          int? participantCount;
-          if (isSplitBill && splitBillId != null && splitBillId.isNotEmpty) {
-            final splitBillData = splitBillMap[splitBillId];
-            if (splitBillData != null) {
-              totalSplitAmount = double.tryParse(
-                      splitBillData['total_amount']?.toString() ?? '0') ??
-                  0.0;
-              List<dynamic> participants = splitBillData['participants'] ?? [];
-              participantCount = participants.length + 1;
-              String splitDescription =
-                  splitBillData['description']?.toString() ?? 'Split Bill';
-              description =
-                  'Split Bill: $splitDescription ($participantCount people)';
-            }
-          }
-
-          // --- Use categoryMap for sales tax and icon ---
-          double salesTax = 0.0;
-          String iconName = "";
-          try {
-            if (data.containsKey('sales_tax_amount')) {
-              if (data['sales_tax_amount'] is String) {
-                salesTax = double.tryParse(data['sales_tax_amount']) ?? 0.0;
-              } else if (data['sales_tax_amount'] is num) {
-                salesTax = data['sales_tax_amount'].toDouble();
-              }
-            } else if (transactionType == 'Expense' &&
-                categoryName.isNotEmpty) {
-              final categoryData = categoryMap[categoryName];
-              if (categoryData != null) {
-                bool isTaxApplicable =
-                    categoryData['salesTaxApplicable'] ?? false;
-                if (isTaxApplicable) {
-                  double taxRate = double.tryParse(
-                          categoryData['salesTaxPercentage']?.toString() ??
-                              '0') ??
-                      0.0;
-                  salesTax = (amountValue * taxRate) / 100;
-                }
-                iconName = categoryData['iconName']?.toString() ?? '';
-              }
-            }
-          } catch (e) {
-            print("Error calculating sales tax for transaction $id: $e");
-          }
-          // If iconName not set, try to get from categoryMap anyway
-          if (iconName.isEmpty && categoryName.isNotEmpty) {
-            final categoryData = categoryMap[categoryName];
-            if (categoryData != null) {
-              iconName = categoryData['iconName']?.toString() ?? '';
-            }
-          }
-
-          // Handle date and time with better error handling
-          DateTime date = DateTime.now();
-          String time = '';
-          try {
-            if (data['timestamp'] is Timestamp) {
-              date = (data['timestamp'] as Timestamp).toDate();
-              time = DateFormat('hh:mm a').format(date);
-            } else if (data['timestamp'] is String) {
-              date = DateTime.tryParse(data['timestamp']) ?? DateTime.now();
-              time = DateFormat('hh:mm a').format(date);
-            } else {
-              time = DateFormat('hh:mm a').format(DateTime.now());
-            }
-          } catch (e) {
-            print("Error parsing timestamp for transaction $id: $e");
-            time = DateFormat('hh:mm a').format(DateTime.now());
-          }
-
-          IconData icon = Icons.money;
-          try {
-            icon = _flutterIcons[iconName] ?? Icons.money;
-          } catch (e) {
-            icon = Icons.money;
-          }
-
-          transactionList.add(Transaction(
-            title: title,
-            description: description,
-            amount: amount,
-            time: time,
-            transactionType: transactionType,
-            icon: icon,
-            id: id,
-            date: date,
-            salesTax: salesTax,
-            categoryName: categoryName,
-            isSplitBill: isSplitBill,
-            splitBillId: splitBillId,
-            totalSplitAmount: totalSplitAmount,
-            participantCount: participantCount,
-          ));
-        } catch (e) {
-          print("Error processing transaction document ${doc.id}: $e");
-          continue;
-        }
-      }
-
-      print("Successfully processed ${transactionList.length} transactions");
-      return transactionList;
     } catch (e) {
       print("Error fetching transactions: $e");
       return [];
     }
   }
 
-// Helper method to get the index of the month with better error handling
+  Future<List<Transaction>> _processTransactionDocs(
+    List<QueryDocumentSnapshot> docs,
+    CollectionReference splitBillsRef,
+    CollectionReference globalCategoriesRef,
+    CollectionReference? userCategoriesRef, // now nullable
+  ) async {
+    // Collect all category names and split bill IDs
+    Set<String> allCategoryNames = {};
+    Set<String> allSplitBillIds = {};
+
+    for (var doc in docs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+
+      String? cat = data['category_name']?.toString();
+      if (cat != null && cat.isNotEmpty) allCategoryNames.add(cat);
+
+      if ((data['is_split_bill'] ?? false) && data['split_bill_id'] != null) {
+        allSplitBillIds.add(data['split_bill_id'].toString());
+      }
+    }
+
+    // Fetch categories in batches (only global)
+    Map<String, Map<String, dynamic>> categoryMap = {};
+    if (allCategoryNames.isNotEmpty) {
+      List<String> categoryList = allCategoryNames.toList();
+
+      // Fetch global categories only
+      for (int i = 0; i < categoryList.length; i += 10) {
+        List<String> batch = categoryList.sublist(
+            i, (i + 10 < categoryList.length) ? i + 10 : categoryList.length);
+
+        QuerySnapshot globalSnap =
+            await globalCategoriesRef.where('name', whereIn: batch).get();
+
+        for (var doc in globalSnap.docs) {
+          final data = doc.data() as Map<String, dynamic>?;
+          if (data != null && data['name'] != null) {
+            categoryMap[data['name'].toString()] = data;
+          }
+        }
+      }
+    }
+
+    // Fetch split bills in batches
+    Map<String, Map<String, dynamic>> splitBillMap = {};
+    if (allSplitBillIds.isNotEmpty) {
+      List<String> idsList = allSplitBillIds.toList();
+      for (int i = 0; i < idsList.length; i += 10) {
+        List<String> batch = idsList.sublist(
+            i, (i + 10 < idsList.length) ? i + 10 : idsList.length);
+
+        QuerySnapshot snap = await splitBillsRef
+            .where(FieldPath.documentId, whereIn: batch)
+            .get();
+
+        for (var doc in snap.docs) {
+          final data = doc.data() as Map<String, dynamic>?;
+          if (data != null) {
+            splitBillMap[doc.id] = data;
+          }
+        }
+      }
+    }
+
+    // Process transactions
+    List<Transaction> transactionList = [];
+
+    for (var doc in docs) {
+      try {
+        Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
+
+        // Validate required fields
+        if (!data.containsKey('transaction_id') ||
+            !data.containsKey('transaction_type') ||
+            !data.containsKey('amount')) {
+          continue;
+        }
+
+        // Skip transactions with no category
+        String categoryName = data['category_name']?.toString() ?? '';
+        if (categoryName.isEmpty) continue;
+
+        String title = categoryName;
+        String description = data['description']?.toString() ?? '';
+        String id = data['transaction_id']?.toString() ?? doc.id;
+        bool isSplitBill = data['is_split_bill'] ?? false;
+        String? splitBillId = data['split_bill_id']?.toString();
+        String transactionType =
+            data['transaction_type']?.toString() ?? 'Expense';
+
+        // Handle amount parsing
+        double amountValue = 0.0;
+        try {
+          if (data['amount'] is String) {
+            amountValue = double.tryParse(data['amount']) ?? 0.0;
+          } else if (data['amount'] is num) {
+            amountValue = data['amount'].toDouble();
+          }
+        } catch (e) {
+          print("Error parsing amount for transaction $id: $e");
+          continue;
+        }
+
+        // Format amount string
+        String amount =
+            '${transactionType == "Income" ? "+" : transactionType == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
+
+        // Handle split bill details
+        double? totalSplitAmount;
+        int? participantCount;
+        if (isSplitBill && splitBillId != null && splitBillId.isNotEmpty) {
+          final splitBillData = splitBillMap[splitBillId];
+          if (splitBillData != null) {
+            totalSplitAmount = double.tryParse(
+                    splitBillData['total_amount']?.toString() ?? '0') ??
+                0.0;
+            List<dynamic> participants = splitBillData['participants'] ?? [];
+            participantCount = participants.length + 1;
+            String splitDescription =
+                splitBillData['description']?.toString() ?? 'Split Bill';
+            description =
+                'Split Bill: $splitDescription ($participantCount people)';
+          }
+        }
+
+        // Handle sales tax and icon
+        double salesTax = 0.0;
+        String iconName = "";
+
+        try {
+          if (data.containsKey('sales_tax_amount')) {
+            if (data['sales_tax_amount'] is String) {
+              salesTax = double.tryParse(data['sales_tax_amount']) ?? 0.0;
+            } else if (data['sales_tax_amount'] is num) {
+              salesTax = data['sales_tax_amount'].toDouble();
+            }
+          } else if (transactionType == 'Expense' && categoryName.isNotEmpty) {
+            final categoryData = categoryMap[categoryName];
+            if (categoryData != null) {
+              bool isTaxApplicable =
+                  categoryData['salesTaxApplicable'] ?? false;
+              if (isTaxApplicable) {
+                double taxRate = double.tryParse(
+                        categoryData['salesTaxPercentage']?.toString() ??
+                            '0') ??
+                    0.0;
+                salesTax = (amountValue * taxRate) / 100;
+              }
+              iconName = categoryData['iconName']?.toString() ?? '';
+            }
+          }
+        } catch (e) {
+          print("Error calculating sales tax for transaction $id: $e");
+        }
+
+        // Get icon from category if not set
+        if (iconName.isEmpty && categoryName.isNotEmpty) {
+          final categoryData = categoryMap[categoryName];
+          if (categoryData != null) {
+            iconName = categoryData['iconName']?.toString() ?? '';
+          }
+        }
+
+        // Handle date and time
+        DateTime date = DateTime.now();
+        String time = '';
+        try {
+          if (data['timestamp'] is Timestamp) {
+            date = (data['timestamp'] as Timestamp).toDate();
+            time = DateFormat('hh:mm a').format(date);
+          } else if (data['timestamp'] is String) {
+            date = DateTime.tryParse(data['timestamp']) ?? DateTime.now();
+            time = DateFormat('hh:mm a').format(date);
+          } else {
+            time = DateFormat('hh:mm a').format(DateTime.now());
+          }
+        } catch (e) {
+          print("Error parsing timestamp for transaction $id: $e");
+          time = DateFormat('hh:mm a').format(DateTime.now());
+        }
+
+        IconData icon = _flutterIcons[iconName] ?? Icons.money;
+
+        transactionList.add(Transaction(
+          title: title,
+          description: description,
+          amount: amount,
+          time: time,
+          transactionType: transactionType,
+          icon: icon,
+          id: id,
+          date: date,
+          salesTax: salesTax,
+          categoryName: categoryName,
+          isSplitBill: isSplitBill,
+          splitBillId: splitBillId,
+          totalSplitAmount: totalSplitAmount,
+          participantCount: participantCount,
+        ));
+      } catch (e) {
+        print("Error processing transaction document ${doc.id}: $e");
+        continue;
+      }
+    }
+
+    print("Successfully processed ${transactionList.length} transactions");
+    return transactionList;
+  }
+
   int _getMonthIndex(String month) {
     try {
       const months = [
@@ -747,13 +827,12 @@ class _TransactionpageState extends State<Transactionpage> {
         'December'
       ];
       int index = months.indexOf(month);
-      return index >= 0 ? index + 1 : 1; // Return January if month not found
+      return index >= 0 ? index + 1 : 1;
     } catch (e) {
       print("Error getting month index for '$month': $e");
-      return 1; // Default to January
+      return 1;
     }
   }
-
 // (Removed duplicate initState)
 
 // Method to handle filter application with error handling
@@ -948,14 +1027,11 @@ class _TransactionpageState extends State<Transactionpage> {
                                 ),
                               ),
                             ),
-                            // Calendar icon button (with purple badge if selectedDate != null)
+                            // Calendar icon button (styled to match filter button)
                             Stack(
                               children: [
-                                IconButton(
-                                  icon: const Icon(Icons.calendar_today_rounded,
-                                      color: Colors.black),
-                                  tooltip: 'Pick a date',
-                                  onPressed: () async {
+                                GestureDetector(
+                                  onTap: () async {
                                     DateTime now = DateTime.now();
                                     final DateTime? picked =
                                         await showDatePicker(
@@ -963,6 +1039,34 @@ class _TransactionpageState extends State<Transactionpage> {
                                       initialDate: selectedDate ?? now,
                                       firstDate: DateTime(now.year - 5),
                                       lastDate: DateTime(now.year + 5),
+                                      builder: (context, child) {
+                                        // Custom theme for better calendar UI
+                                        return Theme(
+                                          data: Theme.of(context).copyWith(
+                                            colorScheme:
+                                                const ColorScheme.light(
+                                              primary: Color.fromRGBO(
+                                                  127, 61, 255, 1), // header bg
+                                              onPrimary:
+                                                  Colors.white, // header text
+                                              onSurface:
+                                                  Colors.black, // body text
+                                            ),
+                                            textButtonTheme:
+                                                TextButtonThemeData(
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: Color.fromRGBO(
+                                                    127,
+                                                    61,
+                                                    255,
+                                                    1), // button text
+                                              ),
+                                            ),
+                                            dialogBackgroundColor: Colors.white,
+                                          ),
+                                          child: child!,
+                                        );
+                                      },
                                     );
                                     if (picked != null) {
                                       setState(() {
@@ -977,15 +1081,38 @@ class _TransactionpageState extends State<Transactionpage> {
                                       });
                                     }
                                   },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: const Color(0xFFE8E8E8),
+                                        width: 1,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.05),
+                                          spreadRadius: 0,
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                        Icons.calendar_today_rounded,
+                                        color: Colors.black,
+                                        size: 20),
+                                  ),
                                 ),
                                 if (selectedDate != null)
                                   Positioned(
-                                    top: 8,
-                                    right: 8,
+                                    top: 6,
+                                    right: 6,
                                     child: Container(
                                       height: 10,
                                       width: 10,
-                                      decoration: BoxDecoration(
+                                      decoration: const BoxDecoration(
                                         color: Color.fromRGBO(127, 61, 255, 1),
                                         shape: BoxShape.circle,
                                       ),
@@ -993,6 +1120,48 @@ class _TransactionpageState extends State<Transactionpage> {
                                   ),
                               ],
                             ),
+                            // Reset button for calendar (shows only if a date is selected)
+                            if (selectedDate != null)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      selectedDate = null;
+                                      selectedMonth =
+                                          months[DateTime.now().month - 1];
+                                      _transactionListFuture =
+                                          fetchTransactions(
+                                        filters: selectedFilters,
+                                        month: selectedMonth,
+                                        date: null,
+                                      );
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: const Color(0xFFE8E8E8),
+                                        width: 1,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.05),
+                                          spreadRadius: 0,
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(Icons.close_rounded,
+                                        color: Color.fromRGBO(127, 61, 255, 1),
+                                        size: 18),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
 
