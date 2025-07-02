@@ -1,9 +1,11 @@
+import 'package:ExpenseTracker/Services/BudgetModificationController.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ExpenseTracker/screens/AddBudgetPage.dart';
 import 'package:ExpenseTracker/screens/DetailBudgetPage.dart';
 import 'package:ExpenseTracker/widgets/CircularMenuWidget.dart';
 import 'package:ExpenseTracker/widgets/CustomBottomNavigationBar.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
 
@@ -17,6 +19,7 @@ class BudgetPage extends StatefulWidget {
 class _BudgetPageState extends State<BudgetPage> {
   final int _activeIndex = 2;
   int _currentMonthIndex = 4;
+  final BudgetController _budgetController = BudgetController();
 
   final List<String> _months = [
     "January",
@@ -73,6 +76,287 @@ class _BudgetPageState extends State<BudgetPage> {
     );
   }
 
+  Future<List<Map<String, dynamic>>> _getBudgetItems() async {
+    try {
+      final selectedMonthNumber = _currentMonthIndex + 1;
+      final currentYear = DateTime.now().year;
+
+      // Get all budgets from BudgetController
+      List<Map<String, dynamic>> allBudgets =
+          await _budgetController.getAllBudgets();
+
+      // Filter budgets based on selected month and current year
+      List<Map<String, dynamic>> filteredBudgets = allBudgets.where((budget) {
+        final budgetMonth = budget['current_month'] as int? ?? 0;
+        final budgetYear = budget['current_year'] as int? ?? 0;
+
+        // For monthly budgets, check if they match the selected month and year
+        if (budget['period'] == 'monthly') {
+          return budgetMonth == selectedMonthNumber &&
+              budgetYear == currentYear;
+        }
+        // For yearly budgets, just check the year
+        else if (budget['period'] == 'yearly') {
+          return budgetYear == currentYear;
+        }
+        // For weekly budgets, include all from current year (you might want to refine this)
+        else if (budget['period'] == 'weekly') {
+          return budgetYear == currentYear;
+        }
+        // For custom periods, include all from current year
+        else {
+          return budgetYear == currentYear;
+        }
+      }).toList();
+
+      // Transform budget data to match the expected format
+      List<Map<String, dynamic>> budgetItems = filteredBudgets.map((budget) {
+        final budgetLimit = (budget['budget_limit'] as num?)?.toDouble() ?? 0.0;
+        final spend = (budget['spend'] as num?)?.toDouble() ?? 0.0;
+        final progress = (budgetLimit > 0) ? spend / budgetLimit : 0.0;
+        final remaining = (budgetLimit - spend).clamp(0.0, double.infinity);
+        final isReached = budget['is_reached'] as bool? ?? false;
+        final alertPercentage =
+            (budget['alert_percentage'] as num?)?.toDouble() ?? 80.0;
+
+        bool alert = spend >= budgetLimit || isReached;
+        bool warning = !alert && (spend / budgetLimit) * 100 >= alertPercentage;
+
+        String alertMessage = '';
+        if (alert) {
+          alertMessage =
+              budget['alert_msg'] as String? ?? 'You\'ve exceeded the limit!';
+        } else if (warning) {
+          alertMessage = 'Approaching budget limit!';
+        }
+
+        Color progressColor;
+        if (alert) {
+          progressColor = Colors.red;
+        } else if (warning) {
+          progressColor = Colors.orange;
+        } else {
+          progressColor = Colors.green;
+        }
+
+        return {
+          'id': budget['id'],
+          'budget_id': budget['budget_id'],
+          'category': budget['budget_name'],
+          'description': budget['description'] ?? '',
+          'remaining': 'Rs${remaining.toStringAsFixed(2)}',
+          'spent':
+              'Rs${spend.toStringAsFixed(2)} of Rs${budgetLimit.toStringAsFixed(2)}',
+          'progress': progress.clamp(0.0, 1.0),
+          'progressColor': progressColor,
+          'alert': alert,
+          'warning': warning,
+          'alertMessage': alertMessage,
+          'period': budget['period'],
+          'budget_limit': budgetLimit,
+          'spend': spend,
+          'is_alert': budget['is_alert'] ?? false,
+          'alert_percentage': alertPercentage,
+          'created_at': budget['created_at'],
+          'updated_at': budget['updated_at'],
+        };
+      }).toList();
+
+      return budgetItems;
+    } catch (e) {
+      debugPrint("Error getting budget items: $e");
+      return [];
+    }
+  }
+
+  Widget _buildBudgetCard(Map<String, dynamic> item) {
+    return GestureDetector(
+      onTap: () => _goToDetailPage(item),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 20.0),
+        child: Container(
+          padding: const EdgeInsets.all(10.0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.2),
+                spreadRadius: 3,
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 10.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item['category'],
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 25,
+                              color: Colors.black,
+                            ),
+                          ),
+                          if (item['description'].isNotEmpty)
+                            Text(
+                              item['description'],
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      // Period indicator
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          item['period'].toString().toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Alert/Warning icon
+                      if (item['alert'])
+                        const Icon(Icons.error, color: Colors.red, size: 20)
+                      else if (item['warning'])
+                        const Icon(Icons.warning,
+                            color: Colors.orange, size: 20),
+                    ],
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 10.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 10),
+                    Text(
+                      "Remaining ${item['remaining']}",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5.0),
+                      child: LinearPercentIndicator(
+                        width: MediaQuery.of(context).size.width - 50,
+                        barRadius: const Radius.circular(10),
+                        lineHeight: 10.0,
+                        percent: item['progress'],
+                        backgroundColor: Colors.grey[300],
+                        progressColor: item['progressColor'],
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
+                    Text(
+                      item['spent'],
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    if (item['alertMessage'].isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Text(
+                          item['alertMessage'],
+                          style: TextStyle(
+                            color: item['alert'] ? Colors.red : Colors.orange,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCreateBudgetCard() {
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context)
+            .push(
+          MaterialPageRoute(
+            builder: (context) => const AddBudgetPage(),
+          ),
+        )
+            .then((_) {
+          // Refresh the page when returning from AddBudgetPage
+          setState(() {});
+        });
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 20.0),
+        child: Container(
+          height: 150,
+          decoration: BoxDecoration(
+            color: const Color.fromRGBO(126, 61, 255, 0.297),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.2),
+                spreadRadius: 3,
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.add,
+                  color: Color.fromRGBO(127, 61, 255, 1),
+                  size: 40,
+                ),
+                SizedBox(height: 10),
+                Text(
+                  "Create a budget",
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Color.fromRGBO(127, 61, 255, 1),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selectedMonth = _months[_currentMonthIndex];
@@ -109,7 +393,7 @@ class _BudgetPageState extends State<BudgetPage> {
           SafeArea(
             child: Column(
               children: [
-                // Months Section (wrapped in black rounded container)
+                // Months Section
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12.0, vertical: 6.0),
@@ -134,16 +418,10 @@ class _BudgetPageState extends State<BudgetPage> {
                       color: Colors.black,
                       constraints: BoxConstraints(
                         minHeight: 35.0,
-                        minWidth: MediaQuery.of(context).size.width / 3 -
-                            20, // Divide width by 3 for each month
+                        minWidth: MediaQuery.of(context).size.width / 3 - 20,
                       ),
-                      isSelected: const [
-                        false,
-                        true,
-                        false
-                      ], // Middle month (selected) is true
+                      isSelected: const [false, true, false],
                       onPressed: (index) {
-                        // Handle month selection if needed
                         if (index == 0) {
                           _goToPreviousMonth();
                         } else if (index == 2) {
@@ -180,6 +458,7 @@ class _BudgetPageState extends State<BudgetPage> {
                     ),
                   ),
                 ),
+                // Budget List
                 Expanded(
                   child: Container(
                     decoration: const BoxDecoration(
@@ -189,225 +468,93 @@ class _BudgetPageState extends State<BudgetPage> {
                         topRight: Radius.circular(20),
                       ),
                     ),
-                    child: FutureBuilder<String>(
-                      future: _getUserEmail(),
+                    child: FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _getBudgetItems(),
                       builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
                           return const Center(
                               child: CircularProgressIndicator());
                         }
-                        final email = snapshot.data!;
-                        return StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance
-                              .collection('categories')
-                              .where('email', isEqualTo: email)
-                              .snapshots(),
-                          builder: (context, snapshot) {
-                            if (!snapshot.hasData) {
-                              return const Center(
-                                  child: CircularProgressIndicator());
-                            }
 
-                            List<Map<String, dynamic>> budgetItems =
-                                snapshot.data!.docs.where((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              final currentMonth =
-                                  data['current_month'] as String? ?? '';
-                              return currentMonth.startsWith(selectedMonth);
-                            }).map((doc) {
-                              final balance = doc['balance'] ?? 0.0;
-                              final spend = doc['spend'] ?? 0.0;
-                              final progress =
-                                  (balance > 0) ? spend / balance : 0.0;
-                              final remaining =
-                                  (balance - spend).clamp(0.0, double.infinity);
-                              bool alert = spend > balance;
-                              String alertMessage =
-                                  alert ? 'Youve exceeded the limit!' : '';
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.error_outline,
+                                    size: 48, color: Colors.red),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Error loading budgets: ${snapshot.error}',
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    setState(() {}); // Refresh
+                                  },
+                                  child: const Text('Retry'),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
 
-                              return {
-                                'category': doc['name'],
-                                'remaining':
-                                    'Rs${remaining.toStringAsFixed(2)}',
-                                'spent':
-                                    'Rs${spend.toStringAsFixed(2)} of Rs${balance.toStringAsFixed(2)}',
-                                'progress': progress.clamp(0.0, 1.0),
-                                'progressColor': progress >= 1
-                                    ? Colors.red
-                                    : progress >= 0.5
-                                        ? Colors.orange
-                                        : Colors.green,
-                                'alert': alert,
-                                'alertMessage': alertMessage,
-                              };
-                            }).toList();
+                        final budgetItems = snapshot.data ?? [];
 
-                            return ListView.builder(
-                              padding: const EdgeInsets.all(10.0),
-                              itemCount: budgetItems.length +
-                                  1, // Add 1 for the "Create" card
-                              itemBuilder: (context, index) {
-                                if (index == budgetItems.length) {
-                                  // "Create a budget" card
-                                  return GestureDetector(
-                                    onTap: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const AddBudgetPage(),
+                        if (budgetItems.isEmpty) {
+                          return Padding(
+                            padding: const EdgeInsets.all(10.0),
+                            child: Column(
+                              children: [
+                                _buildCreateBudgetCard(),
+                                const Expanded(
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.account_balance_wallet_outlined,
+                                          size: 64,
+                                          color: Colors.grey,
                                         ),
-                                      );
-                                    },
-                                    child: Padding(
-                                      padding:
-                                          const EdgeInsets.only(bottom: 20.0),
-                                      child: Container(
-                                        height: 150,
-                                        decoration: BoxDecoration(
-                                          color: const Color.fromRGBO(
-                                              126, 61, 255, 0.297),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color:
-                                                  Colors.grey.withOpacity(0.2),
-                                              spreadRadius: 3,
-                                              blurRadius: 12,
-                                              offset: const Offset(0, 6),
-                                            ),
-                                          ],
-                                        ),
-                                        child: const Center(
-                                          child: Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.add,
-                                                  color: Color.fromRGBO(
-                                                      127, 61, 255, 1),
-                                                  size: 40),
-                                              SizedBox(height: 10),
-                                              Text(
-                                                "Create a budget",
-                                                style: TextStyle(
-                                                  fontSize: 18,
-                                                  color: Color.fromRGBO(
-                                                      127, 61, 255, 1),
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
+                                        SizedBox(height: 16),
+                                        Text(
+                                          'No budgets found',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.grey,
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  );
-                                }
-
-                                final item = budgetItems[index];
-                                return GestureDetector(
-                                  onTap: () => _goToDetailPage(item),
-                                  child: Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 20.0),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(10.0),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(15),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.grey.withOpacity(0.2),
-                                            spreadRadius: 3,
-                                            blurRadius: 12,
-                                            offset: const Offset(0, 6),
+                                        SizedBox(height: 8),
+                                        Text(
+                                          'Create your first budget to start tracking your expenses',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: Colors.grey,
                                           ),
-                                        ],
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Padding(
-                                                padding: const EdgeInsets.only(
-                                                    left:
-                                                        10.0), // Added left padding to align with "Remaining"
-                                                child: Text(
-                                                  item['category'],
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 25,
-                                                    color: Colors.black,
-                                                  ),
-                                                ),
-                                              ),
-                                              if (item['alert'])
-                                                const Icon(Icons.error_outline,
-                                                    color: Colors.red),
-                                            ],
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                                left: 10.0),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                const SizedBox(height: 10),
-                                                Text(
-                                                  "Remaining ${item['remaining']}",
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 20,
-                                                  ),
-                                                ),
-                                                Padding(
-                                                  padding: const EdgeInsets
-                                                      .symmetric(vertical: 5.0),
-                                                  child: LinearPercentIndicator(
-                                                    width: MediaQuery.of(
-                                                                context)
-                                                            .size
-                                                            .width -
-                                                        50, // Adjusted to account for container padding
-                                                    barRadius:
-                                                        const Radius.circular(
-                                                            10),
-                                                    lineHeight: 10.0,
-                                                    percent: item['progress'],
-                                                    backgroundColor:
-                                                        Colors.grey[300],
-                                                    progressColor:
-                                                        item['progressColor'],
-                                                    padding: EdgeInsets.zero,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  item['spent'],
-                                                  style: const TextStyle(
-                                                      color: Colors.grey),
-                                                ),
-                                                if (item['alert'])
-                                                  Text(
-                                                    item['alertMessage'],
-                                                    style: const TextStyle(
-                                                        color: Colors.red),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                );
-                              },
-                            );
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(10.0),
+                          itemCount:
+                              budgetItems.length + 1, // +1 for create card
+                          itemBuilder: (context, index) {
+                            if (index == budgetItems.length) {
+                              return _buildCreateBudgetCard();
+                            }
+                            return _buildBudgetCard(budgetItems[index]);
                           },
                         );
                       },
