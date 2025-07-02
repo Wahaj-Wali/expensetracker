@@ -67,6 +67,62 @@ class _AdminDashboardState extends State<AdminDashboard>
     }
   }
 
+  void _showUserDetails(String userType) {
+    final totalUsers = dashboardData['totalUsers'] ?? 0;
+    final activeUsers = dashboardData['activeUsers'] ?? 0;
+    final userTypesDistribution =
+        dashboardData['userTypesDistribution'] as Map<String, int>? ?? {};
+    final platformUsageStats =
+        dashboardData['platformUsageStats'] as Map<String, int>? ?? {};
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('$userType Details'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (userType == 'Total Users') ...[
+                  Text('Total Users: $totalUsers'),
+                  const SizedBox(height: 16),
+                  const Text('User Types:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...userTypesDistribution.entries.map((entry) => Padding(
+                        padding: const EdgeInsets.only(left: 8, top: 4),
+                        child: Text('${entry.key}: ${entry.value}'),
+                      )),
+                  const SizedBox(height: 16),
+                  const Text('Platform Usage:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...platformUsageStats.entries.map((entry) => Padding(
+                        padding: const EdgeInsets.only(left: 8, top: 4),
+                        child: Text('${entry.key}: ${entry.value}'),
+                      )),
+                ] else if (userType == 'Active Users') ...[
+                  Text('Active Users (Last 30 days): $activeUsers'),
+                  const SizedBox(height: 16),
+                  Text(
+                      'Activity Rate: ${totalUsers > 0 ? ((activeUsers / totalUsers) * 100).toStringAsFixed(1) : 0}%'),
+                  const SizedBox(height: 8),
+                  Text('Inactive Users: ${totalUsers - activeUsers}'),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -145,53 +201,30 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         ),
         const SizedBox(height: 16),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: 1.4,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
+        Row(
           children: [
-            _buildStatCard(
-              title: 'Total Users',
-              value: '${dashboardData['totalUsers'] ?? 0}',
-              icon: Icons.people,
-              color: const Color.fromRGBO(127, 61, 255, 1),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _showUserDetails('Total Users'),
+                child: _buildStatCard(
+                  title: 'Total Users',
+                  value: '${dashboardData['totalUsers'] ?? 0}',
+                  icon: Icons.people,
+                  color: const Color.fromRGBO(127, 61, 255, 1),
+                ),
+              ),
             ),
-            _buildStatCard(
-              title: 'Active Users',
-              value: '${dashboardData['activeUsers'] ?? 0}',
-              icon: Icons.people_alt,
-              color: const Color.fromRGBO(0, 168, 107, 1),
-            ),
-            _buildStatCard(
-              title: 'Total Transactions',
-              value: '${dashboardData['totalTransactions'] ?? 0}',
-              icon: Icons.receipt_long,
-              color: const Color.fromRGBO(253, 60, 74, 1),
-            ),
-            // Switch Net Balance and Total Expenses
-            _buildStatCard(
-              title: 'Net Balance',
-              value:
-                  'PKR ${_formatAmount((dashboardData['totalIncome'] ?? 0.0) - (dashboardData['totalExpenses'] ?? 0.0))}',
-              icon: Icons.account_balance_wallet,
-              color: const Color.fromRGBO(127, 61, 255, 1),
-            ),
-            _buildStatCard(
-              title: 'Total Expenses',
-              value:
-                  'PKR ${_formatAmount(dashboardData['totalExpenses'] ?? 0.0)}',
-              icon: Icons.arrow_downward,
-              color: const Color.fromRGBO(253, 60, 74, 1),
-            ),
-            _buildStatCard(
-              title: 'Total Income',
-              value:
-                  'PKR ${_formatAmount(dashboardData['totalIncome'] ?? 0.0)}',
-              icon: Icons.arrow_upward,
-              color: const Color.fromRGBO(0, 168, 107, 1),
+            const SizedBox(width: 16),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _showUserDetails('Active Users'),
+                child: _buildStatCard(
+                  title: 'Active Users',
+                  value: '${dashboardData['activeUsers'] ?? 0}',
+                  icon: Icons.people_alt,
+                  color: const Color.fromRGBO(0, 168, 107, 1),
+                ),
+              ),
             ),
           ],
         ),
@@ -273,7 +306,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           ),
         ),
         const SizedBox(height: 16),
-        _buildCategorySalesTaxChart(), // changed from _buildCategoryExpensesChart
+        _buildCategorySalesTaxChart(),
         const SizedBox(height: 24),
         _buildMonthlyTrendsChart(),
         const SizedBox(height: 24),
@@ -282,7 +315,6 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
-  // Replace _buildCategoryExpensesChart with this new chart
   Widget _buildCategorySalesTaxChart() {
     final salesTaxStats =
         dashboardData['salesTaxStats'] as Map<String, dynamic>? ?? {};
@@ -434,7 +466,24 @@ class _AdminDashboardState extends State<AdminDashboard>
             height: 200,
             child: LineChart(
               LineChartData(
-                gridData: FlGridData(show: true),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: true,
+                  horizontalInterval: null,
+                  verticalInterval: null,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
+                    );
+                  },
+                  getDrawingVerticalLine: (value) {
+                    return FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
+                    );
+                  },
+                ),
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
@@ -472,7 +521,18 @@ class _AdminDashboardState extends State<AdminDashboard>
                   topTitles:
                       AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
-                borderData: FlBorderData(show: true),
+                borderData: FlBorderData(
+                  show: true,
+                  border: Border.all(
+                    color: Colors.grey.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                minX: 0,
+                maxX: monthlyTrends.length > 1
+                    ? (monthlyTrends.length - 1).toDouble()
+                    : 1,
+                minY: 0,
                 lineBarsData: [
                   LineChartBarData(
                     spots: monthlyTrends.asMap().entries.map((entry) {
@@ -480,9 +540,32 @@ class _AdminDashboardState extends State<AdminDashboard>
                           entry.value['expense'].toDouble());
                     }).toList(),
                     isCurved: true,
+                    curveSmoothness: 0.35,
                     color: const Color.fromRGBO(253, 60, 74, 1),
-                    barWidth: 3,
-                    belowBarData: BarAreaData(show: false),
+                    barWidth: 4,
+                    isStrokeCapRound: true,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, barData, index) {
+                        return FlDotCirclePainter(
+                          radius: 6,
+                          color: const Color.fromRGBO(253, 60, 74, 1),
+                          strokeWidth: 2,
+                          strokeColor: Colors.white,
+                        );
+                      },
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          const Color.fromRGBO(253, 60, 74, 0.3),
+                          const Color.fromRGBO(253, 60, 74, 0.05),
+                        ],
+                      ),
+                    ),
                   ),
                   LineChartBarData(
                     spots: monthlyTrends.asMap().entries.map((entry) {
@@ -490,9 +573,32 @@ class _AdminDashboardState extends State<AdminDashboard>
                           entry.value['income'].toDouble());
                     }).toList(),
                     isCurved: true,
+                    curveSmoothness: 0.35,
                     color: const Color.fromRGBO(0, 168, 107, 1),
-                    barWidth: 3,
-                    belowBarData: BarAreaData(show: false),
+                    barWidth: 4,
+                    isStrokeCapRound: true,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, barData, index) {
+                        return FlDotCirclePainter(
+                          radius: 6,
+                          color: const Color.fromRGBO(0, 168, 107, 1),
+                          strokeWidth: 2,
+                          strokeColor: Colors.white,
+                        );
+                      },
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          const Color.fromRGBO(0, 168, 107, 0.3),
+                          const Color.fromRGBO(0, 168, 107, 0.05),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -504,14 +610,20 @@ class _AdminDashboardState extends State<AdminDashboard>
               Container(
                   width: 12,
                   height: 12,
-                  color: const Color.fromRGBO(253, 60, 74, 1)),
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(253, 60, 74, 1),
+                    borderRadius: BorderRadius.circular(2),
+                  )),
               const SizedBox(width: 8),
               const Text('Expenses', style: TextStyle(color: Colors.black87)),
               const SizedBox(width: 24),
               Container(
                   width: 12,
                   height: 12,
-                  color: const Color.fromRGBO(0, 168, 107, 1)),
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(0, 168, 107, 1),
+                    borderRadius: BorderRadius.circular(2),
+                  )),
               const SizedBox(width: 8),
               const Text('Income', style: TextStyle(color: Colors.black87)),
             ],
