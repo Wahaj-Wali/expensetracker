@@ -404,12 +404,7 @@ class _AddExpensePageState extends State<AddExpensePage>
     final globalSnapshot =
         await FirebaseFirestore.instance.collection('global_categories').get();
 
-    // Fetch user-specific categories
-    final userSnapshot = await FirebaseFirestore.instance
-        .collection('categories')
-        .where('email', isEqualTo: email)
-        .get();
-
+    // Only use global categories
     setState(() {
       categories = [
         ...globalSnapshot.docs.map((doc) {
@@ -418,17 +413,7 @@ class _AddExpensePageState extends State<AddExpensePage>
             "iconName": doc['iconName'],
             "name": doc['name'],
             "iconColor": doc['iconColor'],
-            // Optionally, you can add a flag to distinguish global/user
             "is_global": true,
-          };
-        }),
-        ...userSnapshot.docs.map((doc) {
-          return {
-            "id": doc.id,
-            "iconName": doc['iconName'],
-            "name": doc['name'],
-            "iconColor": doc['iconColor'],
-            "is_global": false,
           };
         }),
       ];
