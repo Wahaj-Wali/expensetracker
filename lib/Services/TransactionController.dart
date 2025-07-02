@@ -1,14 +1,21 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 class TransactionController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final uuid = const Uuid();
 
+  // Process a regular transaction or a split bill transaction
   Future<Map<String, dynamic>> processTransaction({
-    required double amount, // Pass amount as a double
+    required double amount,
     required String accountName,
     required String transactionType,
+    String? categoryName, // Optional for transfers
+    String? description,
+    String? splitBillId, // New parameter for split bills
+    bool isSplitBill = false, // New parameter to identify split bills
   }) async {
     try {
       // Retrieve email from SharedPreferences
@@ -20,6 +27,8 @@ class TransactionController {
           'message': "User email not found in preferences.",
         };
       }
+
+      final String transactionId = uuid.v4();
 
       // Execute Firestore transaction to ensure atomicity
       await _firestore.runTransaction((transaction) async {
@@ -39,8 +48,6 @@ class TransactionController {
 
         // Get current balance and ensure it's a double
         var currentBalance = accountSnapshot.docs.first['balance'];
-
-        // Ensure currentBalance is a double (parse if it's a String)
         double currentBalanceDouble = currentBalance is double
             ? currentBalance
             : double.tryParse(currentBalance.toString()) ?? 0.0;
@@ -58,14 +65,46 @@ class TransactionController {
           throw Exception("Invalid transaction type.");
         }
 
+        // Create transaction document data
+        Map<String, dynamic> transactionData = {
+          'transaction_id': transactionId,
+          'email': email,
+          'transaction_type': transactionType,
+          'amount': amount.toString(),
+          'account_name': accountName,
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'created_at': FieldValue.serverTimestamp(),
+        };
+
+        // Add optional fields if provided
+        if (categoryName != null) {
+          transactionData['category_name'] = categoryName;
+        }
+        if (description != null) {
+          transactionData['description'] = description;
+        }
+        if (isSplitBill) {
+          transactionData['is_split_bill'] = true;
+          if (splitBillId != null) {
+            transactionData['split_bill_id'] = splitBillId;
+          }
+        }
+
         // Update the balance field in Firestore
         transaction.update(accountRef, {'balance': updatedBalance});
+
+        // Create the transaction document
+        transaction.set(
+          _firestore.collection('transactions').doc(transactionId),
+          transactionData,
+        );
       });
 
-      // Return success with a confirmation message
+      // Return success with transaction ID
       return {
         'success': true,
         'message': "Transaction completed successfully.",
+        'transactionId': transactionId,
       };
     } catch (e) {
       // Return failure with an error message
@@ -76,11 +115,79 @@ class TransactionController {
     }
   }
 
+  // Get all transactions including split bills with optional filters
+  Future<List<Map<String, dynamic>>> getAllTransactions({
+    bool includeSplitBills = true,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        throw Exception("User email not found in preferences.");
+      }
+
+      Query query = _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email);
+
+      if (!includeSplitBills) {
+        query = query.where('is_split_bill', isEqualTo: false);
+      }
+
+      if (startDate != null) {
+        query = query.where('timestamp',
+            isGreaterThanOrEqualTo: startDate.toUtc().toIso8601String());
+      }
+
+      if (endDate != null) {
+        query = query.where('timestamp',
+            isLessThanOrEqualTo: endDate.toUtc().toIso8601String());
+      }
+
+      QuerySnapshot querySnapshot =
+          await query.orderBy('timestamp', descending: true).get();
+
+      return querySnapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+    } catch (e) {
+      print("Error getting transactions: $e");
+      return [];
+    }
+  }
+
+  // Get split bill transactions only
+  Future<List<Map<String, dynamic>>> getSplitBillTransactions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        throw Exception("User email not found in preferences.");
+      }
+
+      QuerySnapshot querySnapshot = await _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email)
+          .where('is_split_bill', isEqualTo: true)
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      return querySnapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+    } catch (e) {
+      print("Error getting split bill transactions: $e");
+      return [];
+    }
+  }
+
+  // Delete a transaction with support for split bills
   Future<Map<String, dynamic>> deleteTransaction({
     required String transactionId,
   }) async {
     try {
-      // Retrieve email from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final email = prefs.getString('email');
       if (email == null) {
@@ -90,7 +197,7 @@ class TransactionController {
         };
       }
 
-      // First, find the transaction by transaction_id field (not document ID)
+      // First, find the transaction
       QuerySnapshot transactionQuery = await _firestore
           .collection('transactions')
           .where('email', isEqualTo: email)
@@ -110,18 +217,24 @@ class TransactionController {
 
       // Check if this is a split bill transaction
       if (transactionData['is_split_bill'] == true) {
-        return {
-          'success': false,
-          'message':
-              "Cannot delete split bill transaction directly. Please delete the split bill instead.",
-        };
+        // If it's a split bill transaction, check if the split bill still exists
+        String? splitBillId = transactionData['split_bill_id'];
+        if (splitBillId != null) {
+          DocumentSnapshot splitBillDoc =
+              await _firestore.collection('split_bills').doc(splitBillId).get();
+
+          if (splitBillDoc.exists) {
+            return {
+              'success': false,
+              'message':
+                  "Cannot delete split bill transaction directly. Please delete the split bill instead.",
+            };
+          }
+        }
       }
 
-      // Get transaction details
-      String transactionType = transactionData['transaction_type'];
-
-      // Handle different transaction types
-      if (transactionType == 'Transfer') {
+      // Process the deletion as before
+      if (transactionData['transaction_type'] == 'Transfer') {
         return await _deleteTransferTransaction(
             transactionSnapshot, transactionData, email);
       } else {
@@ -129,13 +242,15 @@ class TransactionController {
             transactionSnapshot, transactionData, email);
       }
     } catch (e) {
-      // Return failure with an error message
       return {
         'success': false,
         'message': "Transaction deletion failed: ${e.toString()}",
       };
     }
   }
+
+  // Existing _deleteRegularTransaction and _deleteTransferTransaction methods remain the same
+  // ... [Keep the rest of your existing TransactionController code]
 
   Future<Map<String, dynamic>> _deleteRegularTransaction(
       DocumentSnapshot transactionSnapshot,
@@ -293,112 +408,5 @@ class TransactionController {
       'success': true,
       'message': "Transfer transaction deleted successfully.",
     };
-  }
-
-  /// Get all transactions including split bill transactions
-  Future<List<Map<String, dynamic>>> getAllTransactions() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('email');
-      if (email == null) {
-        throw Exception("User email not found in preferences.");
-      }
-
-      QuerySnapshot querySnapshot = await _firestore
-          .collection('transactions')
-          .where('email', isEqualTo: email)
-          .orderBy('created_at', descending: true)
-          .get();
-
-      return querySnapshot.docs
-          .map((doc) => doc.data() as Map<String, dynamic>)
-          .toList();
-    } catch (e) {
-      print("Error getting all transactions: $e");
-      return [];
-    }
-  }
-
-  /// Get transactions by type (including split bill filter)
-  Future<List<Map<String, dynamic>>> getTransactionsByType({
-    String? transactionType,
-    bool? isSplitBill,
-  }) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('email');
-      if (email == null) {
-        throw Exception("User email not found in preferences.");
-      }
-
-      Query query = _firestore
-          .collection('transactions')
-          .where('email', isEqualTo: email);
-
-      if (transactionType != null) {
-        query = query.where('transaction_type', isEqualTo: transactionType);
-      }
-
-      if (isSplitBill != null) {
-        query = query.where('is_split_bill', isEqualTo: isSplitBill);
-      }
-
-      QuerySnapshot querySnapshot =
-          await query.orderBy('created_at', descending: true).get();
-
-      return querySnapshot.docs
-          .map((doc) => doc.data() as Map<String, dynamic>)
-          .toList();
-    } catch (e) {
-      print("Error getting transactions by type: $e");
-      return [];
-    }
-  }
-
-  /// Get transaction statistics including split bill stats
-  Future<Map<String, dynamic>> getTransactionStats() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('email');
-      if (email == null) {
-        throw Exception("User email not found in preferences.");
-      }
-
-      QuerySnapshot querySnapshot = await _firestore
-          .collection('transactions')
-          .where('email', isEqualTo: email)
-          .get();
-
-      List<Map<String, dynamic>> transactions = querySnapshot.docs
-          .map((doc) => doc.data() as Map<String, dynamic>)
-          .toList();
-
-      int totalTransactions = transactions.length;
-      int expenseTransactions =
-          transactions.where((t) => t['transaction_type'] == 'Expense').length;
-      int incomeTransactions =
-          transactions.where((t) => t['transaction_type'] == 'Income').length;
-      int transferTransactions =
-          transactions.where((t) => t['transaction_type'] == 'Transfer').length;
-      int splitBillTransactions =
-          transactions.where((t) => t['is_split_bill'] == true).length;
-
-      return {
-        'total_transactions': totalTransactions,
-        'expense_transactions': expenseTransactions,
-        'income_transactions': incomeTransactions,
-        'transfer_transactions': transferTransactions,
-        'split_bill_transactions': splitBillTransactions,
-      };
-    } catch (e) {
-      print("Error getting transaction stats: $e");
-      return {
-        'total_transactions': 0,
-        'expense_transactions': 0,
-        'income_transactions': 0,
-        'transfer_transactions': 0,
-        'split_bill_transactions': 0,
-      };
-    }
   }
 }
