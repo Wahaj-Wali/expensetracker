@@ -32,38 +32,42 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
   @override
   void initState() {
     super.initState();
-    selectedFilters =
-        widget.initialFilters?.map((key, value) => MapEntry(key, value)) ??
-            {
-              'Income': false,
-              'Expense': false,
-              'Split Bills': false, // Add Split Bills option
-            };
+    // Always include Income, Expense, and Split Bills
+    selectedFilters = {
+      'Income': false,
+      'Expense': false,
+      'Split Bills': false,
+    };
+    // If initialFilters provided, override defaults
+    if (widget.initialFilters != null) {
+      for (var entry in widget.initialFilters!.entries) {
+        selectedFilters[entry.key] = entry.value;
+      }
+    }
     fetchCategories();
   }
 
   Future<void> fetchCategories() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('email') ?? '';
-
-    // Query Firestore for categories that match the user's email
+    // Fetch from global_categories instead of user-specific categories
     final snapshot = await FirebaseFirestore.instance
-        .collection('categories')
-        .where('email', isEqualTo: email)
+        .collection('global_categories')
+        .orderBy('name')
         .get();
 
     setState(() {
       categories = snapshot.docs.map((doc) => doc['name'] as String).toList();
-      // Initialize dynamic category filters
+      // Add dynamic categories to filter map if not present
       for (var category in categories) {
-        selectedFilters[category] = false;
+        if (!selectedFilters.containsKey(category)) {
+          selectedFilters[category] = false;
+        }
       }
     });
   }
 
   void _onFilterChipTapped(String filter) {
     setState(() {
-      selectedFilters[filter] = !selectedFilters[filter]!; // Toggle selection
+      selectedFilters[filter] = !(selectedFilters[filter] ?? false);
     });
   }
 
@@ -148,6 +152,7 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
                   children: [
                     _buildFilterChip('Income'),
                     _buildFilterChip('Expense'),
+                    _buildFilterChip('Split Bills'),
                   ],
                 ),
                 const SizedBox(height: 40),
@@ -193,8 +198,7 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
                 ),
               ),
               onPressed: () {
-                widget.onApplyFilters(
-                    selectedFilters); // Pass selectedFilters here
+                widget.onApplyFilters(Map<String, bool>.from(selectedFilters));
                 Navigator.pop(context);
               },
               child: const Text(
@@ -309,7 +313,9 @@ class _TransactionpageState extends State<Transactionpage> {
   Map<String, bool> selectedFilters = {
     'Income': false,
     'Expense': false,
+    'Split Bills': false, // Ensure Split Bills is always present
   };
+
   final Map<String, IconData> _flutterIcons = {
     'Restaurant': Icons.restaurant,
     'Dining': Icons.local_dining,
@@ -390,236 +396,343 @@ class _TransactionpageState extends State<Transactionpage> {
 
   Future<List<Transaction>> fetchTransactions(
       {Map<String, bool>? filters, String? month}) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? email = prefs.getString('email');
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
 
-    CollectionReference transactionsRef =
-        FirebaseFirestore.instance.collection('transactions');
-    CollectionReference categoriesRef =
-        FirebaseFirestore.instance.collection('categories');
-    CollectionReference splitBillsRef =
-        FirebaseFirestore.instance.collection('split_bills');
-
-    Query query = transactionsRef.where('email', isEqualTo: email);
-
-    // Apply filter conditions based on the selected filters
-    if (filters != null && filters.containsValue(true)) {
-      List<String> transactionTypes = [];
-      List<String> categories = [];
-
-      filters.forEach((key, value) {
-        if (value) {
-          if (key == 'Income' || key == 'Expense') {
-            transactionTypes.add(key);
-          } else if (key == 'Split Bills') {
-            query = query.where('is_split_bill', isEqualTo: true);
-          } else {
-            categories.add(key);
-          }
-        }
-      });
-
-      if (transactionTypes.isNotEmpty) {
-        query = query.where('transaction_type', whereIn: transactionTypes);
+      if (email == null || email.isEmpty) {
+        print("Error: User email not found in SharedPreferences");
+        return [];
       }
 
-      if (categories.isNotEmpty) {
-        query = query.where('category_name', whereIn: categories);
-      }
-    }
+      CollectionReference transactionsRef =
+          FirebaseFirestore.instance.collection('transactions');
+      CollectionReference categoriesRef =
+          FirebaseFirestore.instance.collection('categories');
+      CollectionReference splitBillsRef =
+          FirebaseFirestore.instance.collection('split_bills');
 
-    // Add month-based filtering
-    if (month != null) {
-      int monthIndex = _getMonthIndex(month);
-      int currentYear = DateTime.now().year;
+      Query query = transactionsRef.where('email', isEqualTo: email);
 
-      DateTime startOfMonth = DateTime(currentYear, monthIndex, 1);
-      DateTime endOfMonth = (monthIndex < 12)
-          ? DateTime(currentYear, monthIndex + 1, 0)
-          : DateTime(currentYear, 12, 31);
+      // Apply filter conditions based on the selected filters
+      if (filters != null && filters.containsValue(true)) {
+        List<String> transactionTypes = [];
+        List<String> categories = [];
+        bool includeSplitBills = false;
 
-      query = query
-          .where('timestamp', isGreaterThanOrEqualTo: startOfMonth)
-          .where('timestamp', isLessThanOrEqualTo: endOfMonth);
-    }
-
-    QuerySnapshot querySnapshot = await query.get();
-    List<Transaction> transactionList = [];
-
-    for (var doc in querySnapshot.docs) {
-      Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
-
-      if (data == null) continue;
-
-      // Get basic transaction data
-      String title = data.containsKey('category_name')
-          ? data['category_name']
-          : 'No Category';
-      String description = data['description'] ?? '';
-      String id = data['transaction_id'];
-      String categoryName = data['category_name'] ?? 'No Category';
-      bool isSplitBill = data['is_split_bill'] ?? false;
-      String? splitBillId = data['split_bill_id'];
-      String transactionType = data['transaction_type'];
-
-      // Handle amount parsing
-      double amountValue = data['amount'] is String
-          ? double.tryParse(data['amount']) ?? 0.0
-          : data['amount'].toDouble();
-
-      // Format amount string with currency symbol
-      String amount =
-          '${transactionType == "Income" ? "+" : transactionType == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
-
-      // Get split bill details if applicable
-      double? totalSplitAmount;
-      int? participantCount;
-      if (isSplitBill && splitBillId != null) {
-        try {
-          DocumentSnapshot splitBillDoc =
-              await splitBillsRef.doc(splitBillId).get();
-          if (splitBillDoc.exists) {
-            Map<String, dynamic> splitBillData =
-                splitBillDoc.data() as Map<String, dynamic>;
-            totalSplitAmount =
-                double.tryParse(splitBillData['total_amount'].toString()) ??
-                    0.0;
-            participantCount =
-                (splitBillData['participants'] as List?)?.length ?? 0 + 1;
-            description =
-                'Split Bill: ${splitBillData['description']} (${participantCount} people)';
-          }
-        } catch (e) {
-          print("Error fetching split bill details: $e");
-        }
-      }
-
-      // Calculate sales tax
-      double salesTax = 0.0;
-      if (data.containsKey('sales_tax_amount')) {
-        salesTax = data['sales_tax_amount'] is String
-            ? double.tryParse(data['sales_tax_amount']) ?? 0.0
-            : (data['sales_tax_amount'] ?? 0.0).toDouble();
-      } else if (transactionType == 'Expense') {
-        try {
-          // Try global categories first
-          QuerySnapshot categorySnapshot = await categoriesRef
-              .where('name', isEqualTo: categoryName)
-              .limit(1)
-              .get();
-
-          if (categorySnapshot.docs.isEmpty) {
-            // Try user-specific categories
-            categorySnapshot = await categoriesRef
-                .where('email', isEqualTo: email)
-                .where('name', isEqualTo: categoryName)
-                .limit(1)
-                .get();
-          }
-
-          if (categorySnapshot.docs.isNotEmpty) {
-            var categoryData =
-                categorySnapshot.docs.first.data() as Map<String, dynamic>;
-            bool isTaxApplicable = categoryData['salesTaxApplicable'] ?? false;
-            if (isTaxApplicable) {
-              double taxRate =
-                  (categoryData['salesTaxPercentage'] ?? 0.0).toDouble();
-              salesTax = (amountValue * taxRate) / 100;
+        filters.forEach((key, value) {
+          if (value) {
+            if (key == 'Income' || key == 'Expense') {
+              transactionTypes.add(key);
+            } else if (key == 'Split Bills') {
+              includeSplitBills = true;
+            } else {
+              categories.add(key);
             }
           }
-        } catch (e) {
-          print("Error calculating fallback sales tax: $e");
+        });
+
+        // Split Bills filter logic
+        if (includeSplitBills &&
+            transactionTypes.isEmpty &&
+            categories.isEmpty) {
+          query = query.where('is_split_bill', isEqualTo: true);
+        } else if (!includeSplitBills) {
+          query = query.where('is_split_bill', isEqualTo: false);
+        }
+
+        if (transactionTypes.isNotEmpty) {
+          query = query.where('transaction_type', whereIn: transactionTypes);
+        }
+
+        if (categories.isNotEmpty) {
+          query = query.where('category_name', whereIn: categories);
         }
       }
 
-      // Handle date and time
-      DateTime date = (data['timestamp'] as Timestamp).toDate();
-      String time = DateFormat('hh:mm a').format(date);
+      // Add month-based filtering
+      if (month != null && month.isNotEmpty) {
+        try {
+          int monthIndex = _getMonthIndex(month);
+          int currentYear = DateTime.now().year;
+          DateTime startOfMonth = DateTime(currentYear, monthIndex, 1);
+          DateTime endOfMonth =
+              DateTime(currentYear, monthIndex + 1, 0, 23, 59, 59, 999);
+          Timestamp startTimestamp = Timestamp.fromDate(startOfMonth);
+          Timestamp endTimestamp = Timestamp.fromDate(endOfMonth);
 
-      // Get category icon and color
-      String iconName = "";
-      Color iconColor = Colors.grey;
-      IconData icon;
+          query = query
+              .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
+              .where('timestamp', isLessThanOrEqualTo: endTimestamp);
+        } catch (e) {
+          print("Error applying month filter: $e");
+          // Continue without month filter if there's an error
+        }
+      }
 
-      if (isSplitBill) {
-        icon = Icons.group;
-      } else {
-        if (data.containsKey('category_name')) {
+      print("Executing Firestore query for user: $email");
+      QuerySnapshot querySnapshot =
+          await query.orderBy('timestamp', descending: true).get();
+      print(
+          "Query executed successfully. Found ${querySnapshot.docs.length} transactions");
+
+      List<Transaction> transactionList = [];
+
+      for (var doc in querySnapshot.docs) {
+        try {
+          Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+
+          if (data == null) {
+            print("Warning: Document ${doc.id} has null data");
+            continue;
+          }
+
+          // Validate required fields
+          if (!data.containsKey('transaction_id') ||
+              !data.containsKey('transaction_type') ||
+              !data.containsKey('amount')) {
+            print("Warning: Document ${doc.id} missing required fields");
+            continue;
+          }
+
+          // Get basic transaction data with null safety
+          String title = data['category_name']?.toString() ?? 'No Category';
+          String description = data['description']?.toString() ?? '';
+          String id = data['transaction_id']?.toString() ?? doc.id;
+          String categoryName =
+              data['category_name']?.toString() ?? 'No Category';
+          bool isSplitBill = data['is_split_bill'] ?? false;
+          String? splitBillId = data['split_bill_id']?.toString();
+          String transactionType =
+              data['transaction_type']?.toString() ?? 'Expense';
+
+          // Handle amount parsing with better error handling
+          double amountValue = 0.0;
           try {
-            QuerySnapshot categorySnapshot = await categoriesRef
-                .where('name', isEqualTo: data['category_name'])
-                .limit(1)
-                .get();
+            if (data['amount'] is String) {
+              amountValue = double.tryParse(data['amount']) ?? 0.0;
+            } else if (data['amount'] is num) {
+              amountValue = data['amount'].toDouble();
+            }
+          } catch (e) {
+            print("Error parsing amount for transaction $id: $e");
+            amountValue = 0.0;
+          }
 
-            if (categorySnapshot.docs.isEmpty) {
-              categorySnapshot = await categoriesRef
-                  .where('email', isEqualTo: email)
-                  .where('name', isEqualTo: data['category_name'])
+          // Format amount string with currency symbol
+          String amount =
+              '${transactionType == "Income" ? "+" : transactionType == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
+
+          // Get split bill details if applicable
+          double? totalSplitAmount;
+          int? participantCount;
+          if (isSplitBill && splitBillId != null && splitBillId.isNotEmpty) {
+            try {
+              DocumentSnapshot splitBillDoc =
+                  await splitBillsRef.doc(splitBillId).get();
+              if (splitBillDoc.exists) {
+                Map<String, dynamic>? splitBillData =
+                    splitBillDoc.data() as Map<String, dynamic>?;
+                if (splitBillData != null) {
+                  totalSplitAmount = double.tryParse(
+                          splitBillData['total_amount']?.toString() ?? '0') ??
+                      0.0;
+                  List<dynamic> participants =
+                      splitBillData['participants'] ?? [];
+                  participantCount = participants.length + 1; // +1 for the user
+                  String splitDescription =
+                      splitBillData['description']?.toString() ?? 'Split Bill';
+                  description =
+                      'Split Bill: $splitDescription ($participantCount people)';
+                }
+              }
+            } catch (e) {
+              print("Error fetching split bill details for $splitBillId: $e");
+            }
+          }
+
+          // Calculate sales tax with error handling
+          double salesTax = 0.0;
+          try {
+            if (data.containsKey('sales_tax_amount')) {
+              if (data['sales_tax_amount'] is String) {
+                salesTax = double.tryParse(data['sales_tax_amount']) ?? 0.0;
+              } else if (data['sales_tax_amount'] is num) {
+                salesTax = data['sales_tax_amount'].toDouble();
+              }
+            } else if (transactionType == 'Expense' &&
+                categoryName.isNotEmpty) {
+              // Fallback tax calculation
+              QuerySnapshot categorySnapshot = await categoriesRef
+                  .where('name', isEqualTo: categoryName)
                   .limit(1)
                   .get();
-            }
 
-            if (categorySnapshot.docs.isNotEmpty) {
-              var categoryData =
-                  categorySnapshot.docs.first.data() as Map<String, dynamic>;
-              iconName = categoryData['iconName'] ?? '';
-              String colorString = categoryData['iconColor'] ?? '#757575';
+              if (categorySnapshot.docs.isEmpty) {
+                categorySnapshot = await categoriesRef
+                    .where('email', isEqualTo: email)
+                    .where('name', isEqualTo: categoryName)
+                    .limit(1)
+                    .get();
+              }
 
-              try {
-                if (colorString.startsWith('#')) {
-                  iconColor =
-                      Color(int.parse(colorString.replaceFirst('#', '0xff')));
+              if (categorySnapshot.docs.isNotEmpty) {
+                var categoryData =
+                    categorySnapshot.docs.first.data() as Map<String, dynamic>?;
+                if (categoryData != null) {
+                  bool isTaxApplicable =
+                      categoryData['salesTaxApplicable'] ?? false;
+                  if (isTaxApplicable) {
+                    double taxRate = double.tryParse(
+                            categoryData['salesTaxPercentage']?.toString() ??
+                                '0') ??
+                        0.0;
+                    salesTax = (amountValue * taxRate) / 100;
+                  }
                 }
-              } catch (colorError) {
-                print("Error parsing color: $colorError");
               }
             }
           } catch (e) {
-            print("Error fetching category data: $e");
+            print("Error calculating sales tax for transaction $id: $e");
           }
+
+          // Handle date and time with better error handling
+          DateTime date = DateTime.now();
+          String time = '';
+          try {
+            if (data['timestamp'] is Timestamp) {
+              date = (data['timestamp'] as Timestamp).toDate();
+              time = DateFormat('hh:mm a').format(date);
+            } else if (data['timestamp'] is String) {
+              date = DateTime.tryParse(data['timestamp']) ?? DateTime.now();
+              time = DateFormat('hh:mm a').format(date);
+            } else {
+              time = DateFormat('hh:mm a').format(DateTime.now());
+            }
+          } catch (e) {
+            print("Error parsing timestamp for transaction $id: $e");
+            time = DateFormat('hh:mm a').format(DateTime.now());
+          }
+
+          // Get category icon and color with error handling
+          IconData icon = Icons.money;
+          try {
+            if (isSplitBill) {
+              icon = Icons.group;
+            } else {
+              String iconName = "";
+              Color iconColor = Colors.grey;
+
+              if (categoryName.isNotEmpty) {
+                QuerySnapshot categorySnapshot = await categoriesRef
+                    .where('name', isEqualTo: categoryName)
+                    .limit(1)
+                    .get();
+
+                if (categorySnapshot.docs.isEmpty) {
+                  categorySnapshot = await categoriesRef
+                      .where('email', isEqualTo: email)
+                      .where('name', isEqualTo: categoryName)
+                      .limit(1)
+                      .get();
+                }
+
+                if (categorySnapshot.docs.isNotEmpty) {
+                  var categoryData = categorySnapshot.docs.first.data()
+                      as Map<String, dynamic>?;
+                  if (categoryData != null) {
+                    iconName = categoryData['iconName']?.toString() ?? '';
+                  }
+                }
+              }
+              icon = _flutterIcons[iconName] ?? Icons.money;
+            }
+          } catch (e) {
+            print("Error getting category icon for transaction $id: $e");
+            icon = Icons.money;
+          }
+
+          // Create and add transaction object
+          transactionList.add(Transaction(
+            title: title,
+            description: description,
+            amount: amount,
+            time: time,
+            transactionType: transactionType,
+            icon: icon,
+            id: id,
+            date: date,
+            salesTax: salesTax,
+            categoryName: categoryName,
+            isSplitBill: isSplitBill,
+            splitBillId: splitBillId,
+            totalSplitAmount: totalSplitAmount,
+            participantCount: participantCount,
+          ));
+        } catch (e) {
+          print("Error processing transaction document ${doc.id}: $e");
+          // Continue with next transaction instead of failing completely
+          continue;
         }
-        icon = _flutterIcons[iconName] ?? Icons.money;
       }
 
-      // Create and add transaction object
-      transactionList.add(Transaction(
-        title: title,
-        description: description,
-        amount: amount,
-        time: time,
-        transactionType: transactionType,
-        icon: icon,
-        id: id,
-        date: date,
-        salesTax: salesTax,
-        categoryName: categoryName,
-        isSplitBill: isSplitBill,
-        splitBillId: splitBillId,
-        totalSplitAmount: totalSplitAmount,
-        participantCount: participantCount,
-      ));
+      print("Successfully processed ${transactionList.length} transactions");
+      return transactionList;
+    } catch (e) {
+      print("Error fetching transactions: $e");
+      // Return empty list instead of throwing error to prevent app crash
+      return [];
     }
-
-    return transactionList;
   }
 
-  // Helper method to get the index of the month
+// Helper method to get the index of the month with better error handling
   int _getMonthIndex(String month) {
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-    return months.indexOf(month) + 1; // Convert to 1-based index
+    try {
+      const months = [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December'
+      ];
+      int index = months.indexOf(month);
+      return index >= 0 ? index + 1 : 1; // Return January if month not found
+    } catch (e) {
+      print("Error getting month index for '$month': $e");
+      return 1; // Default to January
+    }
+  }
+
+// (Removed duplicate initState)
+
+// Method to handle filter application with error handling
+  void _applyFilters(Map<String, bool> filters) {
+    try {
+      setState(() {
+        selectedFilters = Map.from(filters);
+        selectedFiltersCount =
+            filters.values.where((isSelected) => isSelected).length;
+        _transactionListFuture = fetchTransactions(
+          filters: selectedFilters,
+          month: selectedMonth,
+        );
+      });
+    } catch (e) {
+      print("Error applying filters: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error applying filters: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
 // Helper method to format transaction date
@@ -732,8 +845,11 @@ class _TransactionpageState extends State<Transactionpage> {
                               onChanged: (String? value) {
                                 setState(() {
                                   selectedMonth = value;
-                                  _transactionListFuture =
-                                      fetchTransactions(month: selectedMonth);
+                                  // Pass both filters and month!
+                                  _transactionListFuture = fetchTransactions(
+                                    filters: selectedFilters,
+                                    month: selectedMonth,
+                                  );
                                 });
                               },
                               buttonStyleData: ButtonStyleData(
@@ -793,8 +909,12 @@ class _TransactionpageState extends State<Transactionpage> {
                                     onApplyFilters: (filters) {
                                       setState(() {
                                         selectedFilters = filters;
+                                        // Pass both filters and month!
                                         _transactionListFuture =
-                                            fetchTransactions(filters: filters);
+                                            fetchTransactions(
+                                          filters: filters,
+                                          month: selectedMonth,
+                                        );
                                         selectedFiltersCount = filters.values
                                             .where((isSelected) => isSelected)
                                             .length;
@@ -973,155 +1093,159 @@ class _TransactionpageState extends State<Transactionpage> {
     bool isTaxableExpense =
         transaction.transactionType == "Expense" && transaction.salesTax > 0;
 
+    // Debug: print sales tax for each transaction
+    // print("Transaction: ${transaction.title}, salesTax: ${transaction.salesTax}");
+
     return GestureDetector(
-      onTap: () {
-        if (transaction.id.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => DetailTransactionPage(
-                transactionId: transaction.id,
-                isSplitBill: transaction.isSplitBill,
-                splitBillId: transaction.splitBillId,
+        onTap: () {
+          if (transaction.id.isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DetailTransactionPage(
+                  transactionId: transaction.id,
+                  isSplitBill: transaction.isSplitBill,
+                  splitBillId: transaction.splitBillId,
+                ),
               ),
+            );
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 20.0),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 3,
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-          );
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 20.0),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(15),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.grey.withOpacity(0.2),
-                spreadRadius: 3,
-                blurRadius: 12,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  // Icon section with split bill indicator
-                  Container(
-                    height: 55,
-                    width: 55,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: transaction.isSplitBill
-                          ? const Color.fromRGBO(127, 61, 255, 1)
-                              .withOpacity(0.1)
-                          : transaction.transactionType == "Income"
-                              ? const Color.fromRGBO(0, 168, 107, 1)
-                                  .withOpacity(0.1)
-                              : const Color.fromRGBO(253, 60, 74, 1)
-                                  .withOpacity(0.1),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    // Icon section with split bill indicator
+                    Container(
+                      height: 55,
+                      width: 55,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: transaction.isSplitBill
+                            ? const Color.fromRGBO(127, 61, 255, 1)
+                                .withOpacity(0.1)
+                            : transaction.transactionType == "Income"
+                                ? const Color.fromRGBO(0, 168, 107, 1)
+                                    .withOpacity(0.1)
+                                : const Color.fromRGBO(253, 60, 74, 1)
+                                    .withOpacity(0.1),
+                      ),
+                      child: Icon(
+                        transaction.isSplitBill
+                            ? Icons.group
+                            : transaction.icon,
+                        color: transaction.isSplitBill
+                            ? const Color.fromRGBO(127, 61, 255, 1)
+                            : transaction.transactionType == "Income"
+                                ? const Color.fromRGBO(0, 168, 107, 1)
+                                : const Color.fromRGBO(253, 60, 74, 1),
+                        size: 30,
+                      ),
                     ),
-                    child: Icon(
-                      transaction.isSplitBill ? Icons.group : transaction.icon,
-                      color: transaction.isSplitBill
-                          ? const Color.fromRGBO(127, 61, 255, 1)
-                          : transaction.transactionType == "Income"
-                              ? const Color.fromRGBO(0, 168, 107, 1)
-                              : const Color.fromRGBO(253, 60, 74, 1),
-                      size: 30,
-                    ),
-                  ),
-                  const SizedBox(width: 15),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              transaction.title,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                                color: Colors.black,
+                    const SizedBox(width: 15),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                transaction.title,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                  color: Colors.black,
+                                ),
                               ),
-                            ),
-                            Text(
-                              transaction.amount,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: transaction.transactionType == "Income"
-                                    ? const Color.fromRGBO(0, 168, 107, 1)
-                                    : const Color.fromRGBO(253, 60, 74, 1),
+                              Text(
+                                transaction.amount,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: transaction.transactionType == "Income"
+                                      ? const Color.fromRGBO(0, 168, 107, 1)
+                                      : const Color.fromRGBO(253, 60, 74, 1),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 5),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                transaction.description,
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  transaction.description,
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 14,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                transaction.time,
                                 style: const TextStyle(
                                   color: Colors.grey,
                                   fontSize: 14,
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                            Text(
-                              transaction.time,
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (transaction.isSplitBill &&
-                            transaction.totalSplitAmount != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 5),
-                            child: Text(
-                              'Total bill: Rs${transaction.totalSplitAmount!.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                color: Color.fromRGBO(127, 61, 255, 1),
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                            ],
                           ),
+                          if (transaction.isSplitBill &&
+                              transaction.totalSplitAmount != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 5),
+                              child: Text(
+                                'Total bill: Rs${transaction.totalSplitAmount!.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  color: Color.fromRGBO(127, 61, 255, 1),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (isTaxableExpense)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          'Sales Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ],
-              ),
-              if (isTaxableExpense)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Sales Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          color: Colors.grey,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
-    );
+        ));
   }
 }
