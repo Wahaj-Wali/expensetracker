@@ -7,9 +7,15 @@ import 'package:intl/intl.dart';
 
 class DetailTransactionPage extends StatefulWidget {
   final String transactionId;
+  final bool isSplitBill;
+  final String? splitBillId;
 
-  const DetailTransactionPage({Key? key, required this.transactionId})
-      : super(key: key);
+  const DetailTransactionPage({
+    Key? key,
+    required this.transactionId,
+    this.isSplitBill = false,
+    this.splitBillId,
+  }) : super(key: key);
 
   @override
   _DetailTransactionPageState createState() => _DetailTransactionPageState();
@@ -20,6 +26,7 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
   bool _hasError = false;
   String _errorMessage = '';
   Map<String, dynamic>? transactionData;
+  Map<String, dynamic>? splitBillData;
   final TransactionController _transactionController = TransactionController();
 
   @override
@@ -52,8 +59,24 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
         throw Exception('Transaction not found');
       }
 
+      final transData = querySnapshot.docs.first.data();
+
+      // Fetch split bill data if this is a split bill transaction
+      if (widget.isSplitBill && widget.splitBillId != null) {
+        final splitBillDoc = await FirebaseFirestore.instance
+            .collection('split_bills')
+            .doc(widget.splitBillId)
+            .get();
+
+        if (splitBillDoc.exists) {
+          setState(() {
+            splitBillData = splitBillDoc.data();
+          });
+        }
+      }
+
       setState(() {
-        transactionData = querySnapshot.docs.first.data();
+        transactionData = transData;
         _isLoading = false;
       });
     } catch (e) {
@@ -65,9 +88,87 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
     }
   }
 
+  Widget _buildSplitBillDetailsCard() {
+    if (!widget.isSplitBill || splitBillData == null) {
+      return const SizedBox.shrink();
+    }
+
+    final participants = splitBillData!['participants'] as List?;
+    final totalAmount =
+        double.tryParse(splitBillData!['total_amount'].toString()) ?? 0.0;
+    final userShare =
+        double.tryParse(splitBillData!['user_share'].toString()) ?? 0.0;
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Split Bill Details',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TransactionDetailItem(
+              icon: Icons.attach_money,
+              label: "Total Amount",
+              value: "Rs${totalAmount.toStringAsFixed(2)}",
+            ),
+            TransactionDetailItem(
+              icon: Icons.person,
+              label: "Your Share",
+              value: "Rs${userShare.toStringAsFixed(2)}",
+            ),
+            TransactionDetailItem(
+              icon: Icons.group,
+              label: "Number of Participants",
+              value: "${(participants?.length ?? 0) + 1}", // +1 for the user
+            ),
+            if (participants != null && participants.isNotEmpty)
+              _buildParticipantsList(participants),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildParticipantsList(List participants) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8.0),
+          child: Text(
+            'Participants',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        ...participants
+            .map((participant) => ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.person),
+                  ),
+                  title: Text(participant['name'] ?? 'Unknown'),
+                  subtitle: Text(participant['email'] ?? ''),
+                  contentPadding: EdgeInsets.zero,
+                ))
+            .toList(),
+      ],
+    );
+  }
+
   Future<void> _deleteTransaction() async {
     try {
-      // Show loading dialog
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -82,26 +183,33 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
         ),
       );
 
-      // Call the delete function from TransactionController
+      if (widget.isSplitBill) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Split bill transactions cannot be deleted directly. Please delete the split bill instead.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.pop(context); // Close loading dialog
+        return;
+      }
+
       final result = await _transactionController.deleteTransaction(
         transactionId: widget.transactionId,
       );
 
-      // Close loading dialog
-      Navigator.pop(context);
+      Navigator.pop(context); // Close loading dialog
 
       if (result['success']) {
-        // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result['message']),
             backgroundColor: Colors.green,
           ),
         );
-        // Go back to previous screen
-        Navigator.pop(context, true); // Pass true to indicate deletion occurred
+        Navigator.pop(context, true);
       } else {
-        // Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result['message']),
@@ -110,10 +218,7 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
         );
       }
     } catch (e) {
-      // Close loading dialog if it's still open
       Navigator.pop(context);
-
-      // Show error message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to delete transaction: ${e.toString()}'),
@@ -259,6 +364,7 @@ class _DetailTransactionPageState extends State<DetailTransactionPage> {
         SliverList(
           delegate: SliverChildListDelegate([
             _buildDetailsCard(),
+            if (widget.isSplitBill) _buildSplitBillDetailsCard(),
             _buildNotesSection(),
             if (transactionData!['transaction_type'] == 'Transfer')
               _buildTransferDetailsCard(),

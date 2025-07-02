@@ -32,12 +32,12 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
   @override
   void initState() {
     super.initState();
-    // Initialize with provided filters or defaults
     selectedFilters =
         widget.initialFilters?.map((key, value) => MapEntry(key, value)) ??
             {
               'Income': false,
               'Expense': false,
+              'Split Bills': false, // Add Split Bills option
             };
     fetchCategories();
   }
@@ -269,8 +269,12 @@ class Transaction {
   final IconData icon;
   final String id;
   final DateTime date;
-  final double salesTax; // New field for sales tax
-  final String categoryName; // New field for category name
+  final double salesTax;
+  final String categoryName;
+  final bool isSplitBill; // New field
+  final String? splitBillId; // New field
+  final double? totalSplitAmount; // New field
+  final int? participantCount; // New field
 
   Transaction({
     required this.title,
@@ -283,6 +287,10 @@ class Transaction {
     required this.date,
     required this.salesTax,
     required this.categoryName,
+    this.isSplitBill = false,
+    this.splitBillId,
+    this.totalSplitAmount,
+    this.participantCount,
   });
 }
 
@@ -381,17 +389,16 @@ class _TransactionpageState extends State<Transactionpage> {
   String? selectedMonth;
 
   Future<List<Transaction>> fetchTransactions(
-      {Map<String, bool>? filters,
-      String? month,
-      DateTime? specificDate}) async {
+      {Map<String, bool>? filters, String? month}) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? email = prefs.getString('email');
 
     CollectionReference transactionsRef =
         FirebaseFirestore.instance.collection('transactions');
-    // Use global_categories for category info
-    CollectionReference globalCategoriesRef =
-        FirebaseFirestore.instance.collection('global_categories');
+    CollectionReference categoriesRef =
+        FirebaseFirestore.instance.collection('categories');
+    CollectionReference splitBillsRef =
+        FirebaseFirestore.instance.collection('split_bills');
 
     Query query = transactionsRef.where('email', isEqualTo: email);
 
@@ -404,6 +411,8 @@ class _TransactionpageState extends State<Transactionpage> {
         if (value) {
           if (key == 'Income' || key == 'Expense') {
             transactionTypes.add(key);
+          } else if (key == 'Split Bills') {
+            query = query.where('is_split_bill', isEqualTo: true);
           } else {
             categories.add(key);
           }
@@ -434,60 +443,83 @@ class _TransactionpageState extends State<Transactionpage> {
           .where('timestamp', isLessThanOrEqualTo: endOfMonth);
     }
 
-    // Add specific date filtering (calendar)
-    if (specificDate != null) {
-      DateTime startOfDay = DateTime(
-          specificDate.year, specificDate.month, specificDate.day, 0, 0, 0);
-      DateTime endOfDay = DateTime(specificDate.year, specificDate.month,
-          specificDate.day, 23, 59, 59, 999);
-      query = query
-          .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
-          .where('timestamp', isLessThanOrEqualTo: endOfDay);
-    }
-
-    // --- Fetch all global categories for mapping ---
-    QuerySnapshot globalCategorySnapshot = await globalCategoriesRef.get();
-
-    // Build a map of category name to category data (from global categories only)
-    final Map<String, Map<String, dynamic>> categoryMap = {};
-    for (var doc in globalCategorySnapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      categoryMap[data['name']] = data;
-    }
-
     QuerySnapshot querySnapshot = await query.get();
     List<Transaction> transactionList = [];
 
     for (var doc in querySnapshot.docs) {
-      String title;
       Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
 
       if (data == null) continue;
 
-      title = data.containsKey('category_name')
+      // Get basic transaction data
+      String title = data.containsKey('category_name')
           ? data['category_name']
           : 'No Category';
-
-      String description = data['description'];
-      id = data['transaction_id'];
+      String description = data['description'] ?? '';
+      String id = data['transaction_id'];
       String categoryName = data['category_name'] ?? 'No Category';
+      bool isSplitBill = data['is_split_bill'] ?? false;
+      String? splitBillId = data['split_bill_id'];
+      String transactionType = data['transaction_type'];
 
-      // Parse amount as double for calculation
+      // Handle amount parsing
       double amountValue = data['amount'] is String
           ? double.tryParse(data['amount']) ?? 0.0
           : data['amount'].toDouble();
 
-      // Get sales tax from stored transaction data (preferred method)
+      // Format amount string with currency symbol
+      String amount =
+          '${transactionType == "Income" ? "+" : transactionType == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
+
+      // Get split bill details if applicable
+      double? totalSplitAmount;
+      int? participantCount;
+      if (isSplitBill && splitBillId != null) {
+        try {
+          DocumentSnapshot splitBillDoc =
+              await splitBillsRef.doc(splitBillId).get();
+          if (splitBillDoc.exists) {
+            Map<String, dynamic> splitBillData =
+                splitBillDoc.data() as Map<String, dynamic>;
+            totalSplitAmount =
+                double.tryParse(splitBillData['total_amount'].toString()) ??
+                    0.0;
+            participantCount =
+                (splitBillData['participants'] as List?)?.length ?? 0 + 1;
+            description =
+                'Split Bill: ${splitBillData['description']} (${participantCount} people)';
+          }
+        } catch (e) {
+          print("Error fetching split bill details: $e");
+        }
+      }
+
+      // Calculate sales tax
       double salesTax = 0.0;
       if (data.containsKey('sales_tax_amount')) {
         salesTax = data['sales_tax_amount'] is String
             ? double.tryParse(data['sales_tax_amount']) ?? 0.0
             : (data['sales_tax_amount'] ?? 0.0).toDouble();
-      } else if (data['transaction_type'] == 'Expense') {
-        // Fallback: calculate sales tax if not stored (for old transactions)
+      } else if (transactionType == 'Expense') {
         try {
-          final categoryData = categoryMap[categoryName];
-          if (categoryData != null) {
+          // Try global categories first
+          QuerySnapshot categorySnapshot = await categoriesRef
+              .where('name', isEqualTo: categoryName)
+              .limit(1)
+              .get();
+
+          if (categorySnapshot.docs.isEmpty) {
+            // Try user-specific categories
+            categorySnapshot = await categoriesRef
+                .where('email', isEqualTo: email)
+                .where('name', isEqualTo: categoryName)
+                .limit(1)
+                .get();
+          }
+
+          if (categorySnapshot.docs.isNotEmpty) {
+            var categoryData =
+                categorySnapshot.docs.first.data() as Map<String, dynamic>;
             bool isTaxApplicable = categoryData['salesTaxApplicable'] ?? false;
             if (isTaxApplicable) {
               double taxRate =
@@ -500,33 +532,56 @@ class _TransactionpageState extends State<Transactionpage> {
         }
       }
 
-      String amount =
-          '${data['transaction_type'] == "Income" ? "+" : data['transaction_type'] == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
-      String transactionType = data['transaction_type'];
+      // Handle date and time
       DateTime date = (data['timestamp'] as Timestamp).toDate();
       String time = DateFormat('hh:mm a').format(date);
 
-      // --- Use categoryMap for icon and color ---
-      final categoryData = categoryMap[categoryName];
+      // Get category icon and color
       String iconName = "";
       Color iconColor = Colors.grey;
-      if (categoryData != null) {
-        iconName = categoryData['iconName'] ?? '';
-        String colorString = categoryData['iconColor'] ?? '#757575';
-        try {
-          if (colorString.startsWith('#')) {
-            iconColor = Color(int.parse(colorString.replaceFirst('#', '0xff')));
-          } else {
-            iconColor = Colors.grey;
+      IconData icon;
+
+      if (isSplitBill) {
+        icon = Icons.group;
+      } else {
+        if (data.containsKey('category_name')) {
+          try {
+            QuerySnapshot categorySnapshot = await categoriesRef
+                .where('name', isEqualTo: data['category_name'])
+                .limit(1)
+                .get();
+
+            if (categorySnapshot.docs.isEmpty) {
+              categorySnapshot = await categoriesRef
+                  .where('email', isEqualTo: email)
+                  .where('name', isEqualTo: data['category_name'])
+                  .limit(1)
+                  .get();
+            }
+
+            if (categorySnapshot.docs.isNotEmpty) {
+              var categoryData =
+                  categorySnapshot.docs.first.data() as Map<String, dynamic>;
+              iconName = categoryData['iconName'] ?? '';
+              String colorString = categoryData['iconColor'] ?? '#757575';
+
+              try {
+                if (colorString.startsWith('#')) {
+                  iconColor =
+                      Color(int.parse(colorString.replaceFirst('#', '0xff')));
+                }
+              } catch (colorError) {
+                print("Error parsing color: $colorError");
+              }
+            }
+          } catch (e) {
+            print("Error fetching category data: $e");
           }
-        } catch (colorError) {
-          iconColor = Colors.grey;
         }
+        icon = _flutterIcons[iconName] ?? Icons.money;
       }
 
-      // Make sure iconName matches a key in _flutterIcons
-      IconData icon = _flutterIcons[iconName] ?? Icons.money;
-
+      // Create and add transaction object
       transactionList.add(Transaction(
         title: title,
         description: description,
@@ -538,6 +593,10 @@ class _TransactionpageState extends State<Transactionpage> {
         date: date,
         salesTax: salesTax,
         categoryName: categoryName,
+        isSplitBill: isSplitBill,
+        splitBillId: splitBillId,
+        totalSplitAmount: totalSplitAmount,
+        participantCount: participantCount,
       ));
     }
 
@@ -563,58 +622,197 @@ class _TransactionpageState extends State<Transactionpage> {
     return months.indexOf(month) + 1; // Convert to 1-based index
   }
 
+// Helper method to format transaction date
+  String _formatTransactionDate(DateTime date) {
+    DateTime now = DateTime.now();
+    if (date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day) {
+      return 'Today';
+    } else if (date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day - 1) {
+      return 'Yesterday';
+    } else {
+      return DateFormat('MMMM d, y').format(date);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-        value: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.dark,
-        ),
-        child: Scaffold(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
           backgroundColor: Colors.white,
-          appBar: AppBar(
-            backgroundColor: Colors.white,
-            elevation: 0,
-            scrolledUnderElevation: 0, // Prevents elevation change on scroll
-            title: const Text(
-              "Transactions",
-              style: TextStyle(
-                color: Colors.black,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back, color: Colors.black),
-              onPressed: () {
-                Navigator.pop(context);
-              },
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          title: const Text(
+            "Transactions",
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          body: Stack(
-            children: [
-              Container(
-                height: 200,
-                color:
-                    const Color.fromARGB(255, 255, 255, 255).withOpacity(0.2),
-              ),
-              SafeArea(
-                child: Column(
-                  children: [
-                    // Month selector and filter section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12.0, vertical: 6.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          // Month dropdown and calendar in a row
-                          Row(
-                            children: [
-                              // Month dropdown
-                              Container(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          ),
+        ),
+        body: Stack(
+          children: [
+            Container(
+              height: 200,
+              color: const Color.fromARGB(255, 255, 255, 255).withOpacity(0.2),
+            ),
+            SafeArea(
+              child: Column(
+                children: [
+                  // Month selector and filter section
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12.0, vertical: 6.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Month dropdown
+                        Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                spreadRadius: 0,
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton2<String>(
+                              isExpanded: true,
+                              hint: const Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Month',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.black,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              items: months
+                                  .map(
+                                      (String item) => DropdownMenuItem<String>(
+                                            value: item,
+                                            child: Text(
+                                              item,
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.black,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ))
+                                  .toList(),
+                              value: selectedMonth,
+                              onChanged: (String? value) {
+                                setState(() {
+                                  selectedMonth = value;
+                                  _transactionListFuture =
+                                      fetchTransactions(month: selectedMonth);
+                                });
+                              },
+                              buttonStyleData: ButtonStyleData(
+                                height: 40,
+                                width: 150,
+                                padding:
+                                    const EdgeInsets.only(left: 14, right: 14),
                                 decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  border: Border.all(
+                                    color: const Color(0xFFE8E8E8),
+                                    width: 1,
+                                  ),
                                   borderRadius: BorderRadius.circular(20),
+                                ),
+                                elevation: 0,
+                              ),
+                              iconStyleData: const IconStyleData(
+                                icon: Icon(Icons.keyboard_arrow_down_rounded),
+                                iconSize: 22,
+                                iconEnabledColor:
+                                    Color.fromRGBO(127, 61, 255, 1),
+                              ),
+                              dropdownStyleData: DropdownStyleData(
+                                elevation: 2,
+                                maxHeight: 200,
+                                width: 150,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  color: Colors.white,
+                                ),
+                                offset: const Offset(0, 0),
+                                scrollbarTheme: ScrollbarThemeData(
+                                  radius: const Radius.circular(40),
+                                  thickness: WidgetStateProperty.all<double>(6),
+                                  thumbVisibility:
+                                      WidgetStateProperty.all<bool>(true),
+                                ),
+                              ),
+                              menuItemStyleData: const MenuItemStyleData(
+                                height: 40,
+                                padding: EdgeInsets.only(left: 14, right: 14),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Filter button with badge
+                        Stack(
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                showMaterialModalBottomSheet(
+                                  context: context,
+                                  builder: (context) => CustomFilterModal(
+                                    initialFilters: selectedFilters,
+                                    onApplyFilters: (filters) {
+                                      setState(() {
+                                        selectedFilters = filters;
+                                        _transactionListFuture =
+                                            fetchTransactions(filters: filters);
+                                        selectedFiltersCount = filters.values
+                                            .where((isSelected) => isSelected)
+                                            .length;
+                                      });
+                                    },
+                                  ),
+                                  backgroundColor: Colors.transparent,
+                                );
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: const Color(0xFFE8E8E8),
+                                    width: 1,
+                                  ),
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.05),
@@ -624,570 +822,306 @@ class _TransactionpageState extends State<Transactionpage> {
                                     ),
                                   ],
                                 ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton2<String>(
-                                    isExpanded: true,
-                                    hint: const Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            'Month',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                              color: Colors.black,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    items: months
-                                        .map((String item) =>
-                                            DropdownMenuItem<String>(
-                                              value: item,
-                                              child: Text(
-                                                item,
-                                                style: const TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: Colors.black,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ))
-                                        .toList(),
-                                    value: selectedMonth,
-                                    onChanged: (String? value) {
-                                      setState(() {
-                                        selectedMonth = value;
-                                        selectedDate =
-                                            null; // Clear calendar filter
-                                        _transactionListFuture =
-                                            fetchTransactions(
-                                                month: selectedMonth);
-                                      });
-                                    },
-                                    buttonStyleData: ButtonStyleData(
-                                      height: 40,
-                                      width: 120,
-                                      padding: const EdgeInsets.only(
-                                          left: 14, right: 14),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        border: Border.all(
-                                          color: const Color(0xFFE8E8E8),
-                                          width: 1,
-                                        ),
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      elevation: 0,
-                                    ),
-                                    iconStyleData: const IconStyleData(
-                                      icon: Icon(
-                                        Icons.keyboard_arrow_down_rounded,
-                                      ),
-                                      iconSize: 22,
-                                      iconEnabledColor:
-                                          Color.fromRGBO(127, 61, 255, 1),
-                                    ),
-                                    dropdownStyleData: DropdownStyleData(
-                                      elevation: 2,
-                                      maxHeight: 200,
-                                      width: 120,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(14),
-                                        color: Colors.white,
-                                      ),
-                                      offset: const Offset(0, 0),
-                                      scrollbarTheme: ScrollbarThemeData(
-                                        radius: const Radius.circular(40),
-                                        thickness:
-                                            WidgetStateProperty.all<double>(6),
-                                        thumbVisibility:
-                                            WidgetStateProperty.all<bool>(true),
-                                      ),
-                                    ),
-                                    menuItemStyleData: const MenuItemStyleData(
-                                      height: 40,
-                                      padding:
-                                          EdgeInsets.only(left: 14, right: 14),
-                                    ),
-                                  ),
-                                ),
+                                child: const Icon(Icons.filter_list_rounded,
+                                    size: 20),
                               ),
-                              const SizedBox(width: 10),
-                              // Calendar button
-                              GestureDetector(
-                                onTap: () async {
-                                  DateTime now = DateTime.now();
-                                  DateTime? picked = await showDatePicker(
-                                    context: context,
-                                    initialDate: selectedDate ?? now,
-                                    firstDate: DateTime(now.year - 5),
-                                    lastDate: DateTime(now.year + 5),
-                                    builder: (context, child) {
-                                      return Theme(
-                                        data: Theme.of(context).copyWith(
-                                          colorScheme: const ColorScheme.light(
-                                            primary:
-                                                Color.fromRGBO(127, 61, 255, 1),
-                                            onPrimary: Colors.white,
-                                            onSurface: Colors.black,
-                                          ),
-                                          textButtonTheme: TextButtonThemeData(
-                                            style: TextButton.styleFrom(
-                                              foregroundColor: Color.fromRGBO(
-                                                  127, 61, 255, 1),
-                                            ),
-                                          ),
-                                        ),
-                                        child: child!,
-                                      );
-                                    },
-                                  );
-                                  if (picked != null) {
-                                    setState(() {
-                                      selectedDate = picked;
-                                      selectedMonth =
-                                          null; // Clear month filter
-                                      _transactionListFuture =
-                                          fetchTransactions(
-                                        filters: selectedFilters,
-                                        specificDate: selectedDate,
-                                      );
-                                    });
-                                  }
-                                },
+                            ),
+                            if (selectedFiltersCount > 0)
+                              Positioned(
+                                top: 0,
+                                right: 0,
                                 child: Container(
-                                  padding: const EdgeInsets.all(10),
+                                  height: 20,
+                                  width: 20,
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: const Color(0xFFE8E8E8),
-                                      width: 1,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.07),
-                                        spreadRadius: 0,
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
+                                    color:
+                                        const Color.fromRGBO(127, 61, 255, 1),
+                                    borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(
-                                    Icons.calendar_today_rounded,
-                                    size: 20,
-                                    color: Color.fromARGB(255, 0, 0, 0),
+                                  child: Center(
+                                    child: Text(
+                                      '$selectedFiltersCount',
+                                      style: const TextStyle(
+                                          color: Colors.white, fontSize: 12),
+                                    ),
                                   ),
                                 ),
                               ),
-                              // Show selected date as a pill with clear button
-                              if (selectedDate != null) ...[
-                                const SizedBox(width: 10),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: const Color.fromRGBO(
-                                        127, 61, 255, 0.12),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Text(
-                                        DateFormat('MMM d, yyyy')
-                                            .format(selectedDate!),
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color:
-                                              Color.fromRGBO(127, 61, 255, 1),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      GestureDetector(
-                                        onTap: () {
-                                          setState(() {
-                                            selectedDate = null;
-                                            _transactionListFuture =
-                                                fetchTransactions(
-                                              filters: selectedFilters,
-                                              month: selectedMonth,
-                                            );
-                                          });
-                                        },
-                                        child: const Icon(Icons.clear,
-                                            size: 16, color: Colors.grey),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          // Filter button
-                          Stack(
-                            children: [
-                              GestureDetector(
-                                onTap: () {
-                                  showMaterialModalBottomSheet(
-                                    context: context,
-                                    builder: (context) => CustomFilterModal(
-                                      initialFilters: selectedFilters,
-                                      onApplyFilters: (filters) {
-                                        setState(() {
-                                          selectedFilters = filters;
-                                          _transactionListFuture =
-                                              fetchTransactions(
-                                                  filters: filters,
-                                                  month: selectedMonth,
-                                                  specificDate: selectedDate);
-                                          selectedFiltersCount = filters.values
-                                              .where((isSelected) => isSelected)
-                                              .length;
-                                        });
-                                      },
-                                    ),
-                                    backgroundColor: Colors.transparent,
-                                  );
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: const Color(0xFFE8E8E8),
-                                      width: 1,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.05),
-                                        spreadRadius: 0,
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: const Icon(Icons.filter_list_rounded,
-                                      size: 20),
-                                ),
-                              ),
-                              if (selectedFiltersCount > 0)
-                                Positioned(
-                                  top: 0,
-                                  right: 0,
-                                  child: Container(
-                                    height: 20,
-                                    width: 20,
-                                    decoration: BoxDecoration(
-                                      color:
-                                          const Color.fromRGBO(127, 61, 255, 1),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        '$selectedFiltersCount',
-                                        style: const TextStyle(
-                                            color: Colors.white, fontSize: 12),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Transactions list
-                    Expanded(
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.only(
-                            topLeft: Radius.circular(20),
-                            topRight: Radius.circular(20),
-                          ),
+                          ],
                         ),
-                        // Remove swipe-to-refresh: use FutureBuilder directly
-                        child: FutureBuilder<List<Transaction>>(
-                          future: _transactionListFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Center(
-                                  child: CircularProgressIndicator());
-                            } else if (snapshot.hasError) {
-                              return Center(
-                                child: Text(
-                                  'Error fetching transactions',
-                                  style: TextStyle(color: Colors.red[300]),
-                                ),
-                              );
-                            } else if (!snapshot.hasData ||
-                                snapshot.data!.isEmpty) {
-                              return const Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.receipt_long,
-                                      size: 50,
-                                      color: Colors.grey,
-                                    ),
-                                    SizedBox(height: 16),
-                                    Text(
-                                      'No transactions found',
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
+                      ],
+                    ),
+                  ),
 
-                            // Sort transactions by date (which includes time)
-                            final transactions = snapshot.data!;
-                            transactions
-                                .sort((a, b) => b.date.compareTo(a.date));
-
-                            return ListView.builder(
-                              padding: const EdgeInsets.all(10),
-                              itemCount: transactions.length,
-                              itemBuilder: (context, index) {
-                                final transaction = transactions[index];
-                                final previousTransaction =
-                                    index > 0 ? transactions[index - 1] : null;
-
-                                // Format dates for comparison
-                                String currentDate =
-                                    _formatTransactionDate(transaction.date);
-                                String? previousDate;
-                                if (previousTransaction != null) {
-                                  previousDate = _formatTransactionDate(
-                                      previousTransaction.date);
-                                }
-
-                                // Show date header if needed
-                                bool showDateHeader =
-                                    currentDate != previousDate;
-
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (showDateHeader)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          left: 10,
-                                          top: 15,
-                                          bottom: 10,
-                                        ),
-                                        child: Text(
-                                          currentDate,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 18,
-                                            color: Colors.black,
-                                          ),
-                                        ),
-                                      ),
-                                    _buildTransactionItem(context, transaction),
-                                  ],
-                                );
-                              },
+                  // Transactions list
+                  Expanded(
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: FutureBuilder<List<Transaction>>(
+                        future: _transactionListFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          } else if (snapshot.hasError) {
+                            return Center(
+                              child: Text(
+                                'Error fetching transactions',
+                                style: TextStyle(color: Colors.red[300]),
+                              ),
                             );
-                          },
-                        ),
+                          } else if (!snapshot.hasData ||
+                              snapshot.data!.isEmpty) {
+                            return const Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.receipt_long,
+                                    size: 50,
+                                    color: Colors.grey,
+                                  ),
+                                  SizedBox(height: 16),
+                                  Text(
+                                    'No transactions found',
+                                    style: TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+
+                          final transactions = snapshot.data!;
+                          transactions.sort((a, b) {
+                            int dateComparison = b.date.compareTo(a.date);
+                            return dateComparison == 0
+                                ? b.time.compareTo(a.time)
+                                : dateComparison;
+                          });
+
+                          return ListView.builder(
+                            padding: const EdgeInsets.all(10),
+                            itemCount: transactions.length,
+                            itemBuilder: (context, index) {
+                              final transaction = transactions[index];
+                              final previousTransaction =
+                                  index > 0 ? transactions[index - 1] : null;
+
+                              String currentDate =
+                                  _formatTransactionDate(transaction.date);
+                              String? previousDate;
+                              if (previousTransaction != null) {
+                                previousDate = _formatTransactionDate(
+                                    previousTransaction.date);
+                              }
+
+                              bool showDateHeader = currentDate != previousDate;
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (showDateHeader)
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        left: 10,
+                                        top: 15,
+                                        bottom: 10,
+                                      ),
+                                      child: Text(
+                                        currentDate,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 18,
+                                          color: Colors.black,
+                                        ),
+                                      ),
+                                    ),
+                                  _buildTransactionItem(context, transaction),
+                                ],
+                              );
+                            },
+                          );
+                        },
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          bottomNavigationBar: CustomBottomNavigationBar(
-            activeIndex: _activeIndex,
-          ),
-          floatingActionButton: const CircularMenuWidget(),
-          floatingActionButtonLocation:
-              FloatingActionButtonLocation.centerDocked,
-        ));
+            ),
+          ],
+        ),
+        bottomNavigationBar: CustomBottomNavigationBar(
+          activeIndex: _activeIndex,
+        ),
+        floatingActionButton: const CircularMenuWidget(),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      ),
+    );
   }
 
-  // Updated transaction item to match BudgetPage styling
-  // Updated transaction item with sales tax display
   Widget _buildTransactionItem(BuildContext context, Transaction transaction) {
     bool isTaxableExpense =
         transaction.transactionType == "Expense" && transaction.salesTax > 0;
 
     return GestureDetector(
-        onTap: () {
-          if (transaction.id.isNotEmpty) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    DetailTransactionPage(transactionId: transaction.id),
+      onTap: () {
+        if (transaction.id.isNotEmpty) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DetailTransactionPage(
+                transactionId: transaction.id,
+                isSplitBill: transaction.isSplitBill,
+                splitBillId: transaction.splitBillId,
               ),
-            );
-          }
-        },
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 20.0),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.2),
-                  spreadRadius: 3,
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
-                ),
-              ],
             ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    // Icon section
-                    Container(
-                      height: 55,
-                      width: 55,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        color: transaction.transactionType == "Income"
-                            ? const Color.fromRGBO(0, 168, 107, 1)
-                                .withOpacity(0.1)
-                            : transaction.transactionType == "Expense"
-                                ? const Color.fromRGBO(253, 60, 74, 1)
-                                    .withOpacity(0.1)
-                                : const Color.fromRGBO(0, 119, 255, 1)
-                                    .withOpacity(0.1),
-                      ),
-                      child: Icon(
-                        transaction.icon,
-                        color: transaction.transactionType == "Income"
-                            ? const Color.fromRGBO(0, 168, 107, 1)
-                            : transaction.transactionType == "Expense"
-                                ? const Color.fromRGBO(253, 60, 74, 1)
-                                : const Color.fromRGBO(0, 119, 255, 1),
-                        size: 30,
-                      ),
+          );
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 20.0),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.2),
+                spreadRadius: 3,
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  // Icon section with split bill indicator
+                  Container(
+                    height: 55,
+                    width: 55,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: transaction.isSplitBill
+                          ? const Color.fromRGBO(127, 61, 255, 1)
+                              .withOpacity(0.1)
+                          : transaction.transactionType == "Income"
+                              ? const Color.fromRGBO(0, 168, 107, 1)
+                                  .withOpacity(0.1)
+                              : const Color.fromRGBO(253, 60, 74, 1)
+                                  .withOpacity(0.1),
                     ),
-                    const SizedBox(width: 15),
-                    // Title and description
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            transaction.title,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                              color: Colors.black,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            transaction.description,
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                          if (transaction.transactionType == "Expense") ...[
-                            const SizedBox(height: 5),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: transaction.salesTax > 0
-                                    ? const Color.fromRGBO(253, 60, 74, 0.12)
-                                    : Colors.green.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(8),
+                    child: Icon(
+                      transaction.isSplitBill ? Icons.group : transaction.icon,
+                      color: transaction.isSplitBill
+                          ? const Color.fromRGBO(127, 61, 255, 1)
+                          : transaction.transactionType == "Income"
+                              ? const Color.fromRGBO(0, 168, 107, 1)
+                              : const Color.fromRGBO(253, 60, 74, 1),
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 15),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              transaction.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                                color: Colors.black,
                               ),
-                              child: Text(
-                                transaction.salesTax > 0
-                                    ? 'Tax: ${transaction.salesTax.toStringAsFixed(2)}'
-                                    : 'Exempt',
-                                style: TextStyle(
-                                  color: transaction.salesTax > 0
-                                      ? const Color.fromRGBO(253, 60, 74, 1)
-                                      : Colors.green,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
+                            ),
+                            Text(
+                              transaction.amount,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: transaction.transactionType == "Income"
+                                    ? const Color.fromRGBO(0, 168, 107, 1)
+                                    : const Color.fromRGBO(253, 60, 74, 1),
                               ),
                             ),
                           ],
-                          // Show date below description/tax
-                          const SizedBox(height: 5),
-                          Text(
-                            DateFormat('MMM d, yyyy').format(transaction.date),
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Amount and time
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          transaction.amount,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: transaction.transactionType == "Income"
-                                ? const Color.fromRGBO(0, 168, 107, 1)
-                                : transaction.transactionType == "Expense"
-                                    ? const Color.fromRGBO(253, 60, 74, 1)
-                                    : const Color.fromRGBO(0, 119, 255, 1),
-                          ),
                         ),
                         const SizedBox(height: 5),
-                        Text(
-                          transaction.time,
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                transaction.description,
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 14,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              transaction.time,
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
                         ),
+                        if (transaction.isSplitBill &&
+                            transaction.totalSplitAmount != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 5),
+                            child: Text(
+                              'Total bill: Rs${transaction.totalSplitAmount!.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                color: Color.fromRGBO(127, 61, 255, 1),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
-                  ],
+                  ),
+                ],
+              ),
+              if (isTaxableExpense)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Sales Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
+            ],
           ),
-        ));
-  }
-
-  String _formatTransactionDate(DateTime date) {
-    DateTime now = DateTime.now();
-    DateTime yesterday = now.subtract(const Duration(days: 1));
-
-    if (date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day) {
-      return 'Today';
-    } else if (date.year == yesterday.year &&
-        date.month == yesterday.month &&
-        date.day == yesterday.day) {
-      return 'Yesterday';
-    } else {
-      return DateFormat('MMMM d, y').format(date);
-    }
+        ),
+      ),
+    );
   }
 }
