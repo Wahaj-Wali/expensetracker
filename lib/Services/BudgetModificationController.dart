@@ -56,6 +56,136 @@ class BudgetController {
     }
   }
 
+  /// Get all categories with their budget status - NEW METHOD for AddExpensePage
+  Future<List<Map<String, dynamic>>> getAllCategoriesWithBudgets() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) {
+        debugPrint("Email not found in shared preferences.");
+        return [];
+      }
+
+      // Fetch global categories
+      QuerySnapshot globalCategoriesSnapshot =
+          await _firestore.collection('global_categories').get();
+
+      // Fetch user's active budgets
+      QuerySnapshot budgetsSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('is_active', isEqualTo: true)
+          .get();
+
+      // Create a map of budget names for quick lookup
+      Map<String, Map<String, dynamic>> userBudgets = {};
+      for (var budgetDoc in budgetsSnapshot.docs) {
+        var budgetData = budgetDoc.data() as Map<String, dynamic>;
+        userBudgets[budgetData['budget_name']] = {
+          'budget_id': budgetData['budget_id'],
+          'budget_limit': budgetData['budget_limit'],
+          'spend': budgetData['spend'] ?? 0,
+          'period': budgetData['period'],
+          'is_alert': budgetData['is_alert'] ?? false,
+          'alert_percentage': budgetData['alert_percentage'] ?? 80,
+          'is_reached': budgetData['is_reached'] ?? false,
+        };
+      }
+
+      // Combine categories with budget information
+      List<Map<String, dynamic>> categoriesWithBudgets = [];
+
+      for (var categoryDoc in globalCategoriesSnapshot.docs) {
+        var categoryData = categoryDoc.data() as Map<String, dynamic>;
+        String categoryName = categoryData['name'];
+
+        bool hasBudget = userBudgets.containsKey(categoryName);
+
+        categoriesWithBudgets.add({
+          'id': categoryDoc.id,
+          'name': categoryName,
+          'iconName': categoryData['iconName'],
+          'iconColor': categoryData['iconColor'],
+          'has_budget': hasBudget,
+          'budget_info': hasBudget ? userBudgets[categoryName] : null,
+          'is_global': true,
+        });
+      }
+
+      debugPrint(
+          "Retrieved ${categoriesWithBudgets.length} categories with budget status");
+      return categoriesWithBudgets;
+    } catch (e) {
+      debugPrint("Error getting categories with budgets: $e");
+      return [];
+    }
+  }
+
+  /// Get categories that have budgets set - Helper method for dropdown filtering
+  Future<List<Map<String, dynamic>>> getCategoriesWithBudgets() async {
+    try {
+      List<Map<String, dynamic>> allCategories =
+          await getAllCategoriesWithBudgets();
+      return allCategories
+          .where((category) => category['has_budget'] == true)
+          .toList();
+    } catch (e) {
+      debugPrint("Error getting categories with budgets: $e");
+      return [];
+    }
+  }
+
+  /// Check if a specific category has a budget
+  Future<bool> categoryHasBudget(String categoryName) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) return false;
+
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('budget_name', isEqualTo: categoryName)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      return budgetSnapshot.docs.isNotEmpty;
+    } catch (e) {
+      debugPrint("Error checking if category has budget: $e");
+      return false;
+    }
+  }
+
+  /// Get budget info for a specific category
+  Future<Map<String, dynamic>?> getCategoryBudgetInfo(
+      String categoryName) async {
+    try {
+      var budgetInfo = await getBudgetByName(categoryName);
+      if (budgetInfo != null) {
+        // Calculate additional metrics
+        double budgetLimit = budgetInfo['budget_limit']?.toDouble() ?? 0;
+        double spend = budgetInfo['spend']?.toDouble() ?? 0;
+        double remaining = budgetLimit - spend;
+        double progressPercentage =
+            budgetLimit > 0 ? (spend / budgetLimit) * 100 : 0;
+
+        return {
+          ...budgetInfo,
+          'remaining_amount': remaining,
+          'progress_percentage': progressPercentage,
+          'is_over_budget': spend > budgetLimit,
+        };
+      }
+      return null;
+    } catch (e) {
+      debugPrint("Error getting category budget info: $e");
+      return null;
+    }
+  }
+
   /// Check if budget alerts should be triggered
   Future<void> _checkBudgetAlerts(Map<String, dynamic> budgetData,
       double newSpendAmount, String budgetName) async {
