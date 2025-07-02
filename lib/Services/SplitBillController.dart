@@ -15,7 +15,9 @@ class SplitBillService {
     required String categoryName,
     required List<Map<String, dynamic>> participants,
     required String description,
-    String? notes,
+    required String splitType, // 'equal', 'percentage', 'custom'
+    Map<String, double>? customAmounts, // for custom split
+    Map<String, double>? percentages, // for percentage split
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -31,9 +33,98 @@ class SplitBillService {
       String splitBillId = uuid.v4();
       String transactionId = uuid.v4();
 
-      // Calculate user's share
-      double numberOfParticipants = participants.length + 1; // +1 for the user
-      double userShare = totalAmount / numberOfParticipants;
+      // Calculate user's share based on split type
+      double userShare = 0.0;
+      List<Map<String, dynamic>> updatedParticipants = [];
+
+      switch (splitType) {
+        case 'equal':
+          double numberOfParticipants =
+              participants.length + 1; // +1 for the user
+          userShare = totalAmount / numberOfParticipants;
+          double participantShare = userShare;
+
+          for (var participant in participants) {
+            updatedParticipants.add({
+              'name': participant['name'],
+              'email': participant['email'],
+              'amount': participantShare,
+            });
+          }
+          break;
+
+        case 'percentage':
+          if (percentages == null) {
+            return {
+              'success': false,
+              'message': "Percentages are required for percentage split.",
+            };
+          }
+
+          // Calculate user's percentage (remaining percentage)
+          double totalParticipantPercentage = 0.0;
+          for (var participant in participants) {
+            String participantKey = participant['email'] ?? participant['name'];
+            double percentage = percentages[participantKey] ?? 0.0;
+            totalParticipantPercentage += percentage;
+
+            updatedParticipants.add({
+              'name': participant['name'],
+              'email': participant['email'],
+              'amount': (totalAmount * percentage / 100),
+              'percentage': percentage,
+            });
+          }
+
+          double userPercentage = 100.0 - totalParticipantPercentage;
+          userShare = totalAmount * userPercentage / 100;
+
+          if (userPercentage < 0) {
+            return {
+              'success': false,
+              'message': "Total percentage cannot exceed 100%.",
+            };
+          }
+          break;
+
+        case 'custom':
+          if (customAmounts == null) {
+            return {
+              'success': false,
+              'message': "Custom amounts are required for custom split.",
+            };
+          }
+
+          double totalParticipantAmount = 0.0;
+          for (var participant in participants) {
+            String participantKey = participant['email'] ?? participant['name'];
+            double amount = customAmounts[participantKey] ?? 0.0;
+            totalParticipantAmount += amount;
+
+            updatedParticipants.add({
+              'name': participant['name'],
+              'email': participant['email'],
+              'amount': amount,
+            });
+          }
+
+          userShare = totalAmount - totalParticipantAmount;
+
+          if (userShare < 0) {
+            return {
+              'success': false,
+              'message':
+                  "Total custom amounts cannot exceed the total bill amount.",
+            };
+          }
+          break;
+
+        default:
+          return {
+            'success': false,
+            'message': "Invalid split type.",
+          };
+      }
 
       // First process the expense transaction
       Map<String, dynamic> transactionResult =
@@ -57,8 +148,8 @@ class SplitBillService {
         'category_name': categoryName,
         'account_name': accountName,
         'description': description,
-        'notes': notes,
-        'participants': participants,
+        'split_type': splitType,
+        'participants': updatedParticipants,
         'status': 'pending', // pending, settled
         'created_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
