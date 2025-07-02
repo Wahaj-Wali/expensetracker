@@ -348,6 +348,8 @@ class _TransactionpageState extends State<Transactionpage> {
 
   late Future<List<Transaction>> _transactionListFuture;
 
+  DateTime? selectedDate; // Add this for calendar support
+
   @override
   void initState() {
     super.initState();
@@ -379,14 +381,17 @@ class _TransactionpageState extends State<Transactionpage> {
   String? selectedMonth;
 
   Future<List<Transaction>> fetchTransactions(
-      {Map<String, bool>? filters, String? month}) async {
+      {Map<String, bool>? filters,
+      String? month,
+      DateTime? specificDate}) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? email = prefs.getString('email');
 
     CollectionReference transactionsRef =
         FirebaseFirestore.instance.collection('transactions');
-    CollectionReference categoriesRef =
-        FirebaseFirestore.instance.collection('categories');
+    // Use global_categories for category info
+    CollectionReference globalCategoriesRef =
+        FirebaseFirestore.instance.collection('global_categories');
 
     Query query = transactionsRef.where('email', isEqualTo: email);
 
@@ -429,6 +434,27 @@ class _TransactionpageState extends State<Transactionpage> {
           .where('timestamp', isLessThanOrEqualTo: endOfMonth);
     }
 
+    // Add specific date filtering (calendar)
+    if (specificDate != null) {
+      DateTime startOfDay = DateTime(
+          specificDate.year, specificDate.month, specificDate.day, 0, 0, 0);
+      DateTime endOfDay = DateTime(specificDate.year, specificDate.month,
+          specificDate.day, 23, 59, 59, 999);
+      query = query
+          .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
+          .where('timestamp', isLessThanOrEqualTo: endOfDay);
+    }
+
+    // --- Fetch all global categories for mapping ---
+    QuerySnapshot globalCategorySnapshot = await globalCategoriesRef.get();
+
+    // Build a map of category name to category data (from global categories only)
+    final Map<String, Map<String, dynamic>> categoryMap = {};
+    for (var doc in globalCategorySnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      categoryMap[data['name']] = data;
+    }
+
     QuerySnapshot querySnapshot = await query.get();
     List<Transaction> transactionList = [];
 
@@ -460,24 +486,8 @@ class _TransactionpageState extends State<Transactionpage> {
       } else if (data['transaction_type'] == 'Expense') {
         // Fallback: calculate sales tax if not stored (for old transactions)
         try {
-          // Query categories without email filter first, then with email filter
-          QuerySnapshot categorySnapshot = await categoriesRef
-              .where('name', isEqualTo: categoryName)
-              .limit(1)
-              .get();
-
-          if (categorySnapshot.docs.isEmpty) {
-            // Try with email filter
-            categorySnapshot = await categoriesRef
-                .where('email', isEqualTo: email)
-                .where('name', isEqualTo: categoryName)
-                .limit(1)
-                .get();
-          }
-
-          if (categorySnapshot.docs.isNotEmpty) {
-            var categoryData =
-                categorySnapshot.docs.first.data() as Map<String, dynamic>;
+          final categoryData = categoryMap[categoryName];
+          if (categoryData != null) {
             bool isTaxApplicable = categoryData['salesTaxApplicable'] ?? false;
             if (isTaxApplicable) {
               double taxRate =
@@ -487,7 +497,6 @@ class _TransactionpageState extends State<Transactionpage> {
           }
         } catch (e) {
           print("Error calculating fallback sales tax: $e");
-          // Continue without sales tax if calculation fails
         }
       }
 
@@ -497,50 +506,25 @@ class _TransactionpageState extends State<Transactionpage> {
       DateTime date = (data['timestamp'] as Timestamp).toDate();
       String time = DateFormat('hh:mm a').format(date);
 
+      // --- Use categoryMap for icon and color ---
+      final categoryData = categoryMap[categoryName];
       String iconName = "";
       Color iconColor = Colors.grey;
-
-      // Query for category icon - try both with and without email filter
-      if (data.containsKey('category_name')) {
+      if (categoryData != null) {
+        iconName = categoryData['iconName'] ?? '';
+        String colorString = categoryData['iconColor'] ?? '#757575';
         try {
-          QuerySnapshot categorySnapshot = await categoriesRef
-              .where('name', isEqualTo: data['category_name'])
-              .limit(1)
-              .get();
-
-          if (categorySnapshot.docs.isEmpty) {
-            // Try with email filter for user-specific categories
-            categorySnapshot = await categoriesRef
-                .where('email', isEqualTo: email)
-                .where('name', isEqualTo: data['category_name'])
-                .limit(1)
-                .get();
+          if (colorString.startsWith('#')) {
+            iconColor = Color(int.parse(colorString.replaceFirst('#', '0xff')));
+          } else {
+            iconColor = Colors.grey;
           }
-
-          if (categorySnapshot.docs.isNotEmpty) {
-            var categoryData =
-                categorySnapshot.docs.first.data() as Map<String, dynamic>;
-            iconName = categoryData['iconName'] ?? '';
-            String colorString = categoryData['iconColor'] ?? '#757575';
-
-            // Parse color safely
-            try {
-              if (colorString.startsWith('#')) {
-                iconColor =
-                    Color(int.parse(colorString.replaceFirst('#', '0xff')));
-              } else {
-                iconColor = Colors.grey;
-              }
-            } catch (colorError) {
-              iconColor = Colors.grey;
-            }
-          }
-        } catch (e) {
-          print("Error fetching category data: $e");
-          // Continue with default icon and color
+        } catch (colorError) {
+          iconColor = Colors.grey;
         }
       }
 
+      // Make sure iconName matches a key in _flutterIcons
       IconData icon = _flutterIcons[iconName] ?? Icons.money;
 
       transactionList.add(Transaction(
@@ -624,108 +608,225 @@ class _TransactionpageState extends State<Transactionpage> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Month dropdown
-                          Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  spreadRadius: 0,
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton2<String>(
-                                isExpanded: true,
-                                hint: const Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Month',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color: Colors.black,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                          // Month dropdown and calendar in a row
+                          Row(
+                            children: [
+                              // Month dropdown
+                              Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      spreadRadius: 0,
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 2),
                                     ),
                                   ],
                                 ),
-                                items: months
-                                    .map((String item) =>
-                                        DropdownMenuItem<String>(
-                                          value: item,
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton2<String>(
+                                    isExpanded: true,
+                                    hint: const Row(
+                                      children: [
+                                        Expanded(
                                           child: Text(
-                                            item,
-                                            style: const TextStyle(
+                                            'Month',
+                                            style: TextStyle(
                                               fontSize: 14,
                                               fontWeight: FontWeight.w500,
                                               color: Colors.black,
                                             ),
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                        ))
-                                    .toList(),
-                                value: selectedMonth,
-                                onChanged: (String? value) {
-                                  setState(() {
-                                    selectedMonth = value;
-                                    _transactionListFuture =
-                                        fetchTransactions(month: selectedMonth);
-                                  });
+                                        ),
+                                      ],
+                                    ),
+                                    items: months
+                                        .map((String item) =>
+                                            DropdownMenuItem<String>(
+                                              value: item,
+                                              child: Text(
+                                                item,
+                                                style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Colors.black,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ))
+                                        .toList(),
+                                    value: selectedMonth,
+                                    onChanged: (String? value) {
+                                      setState(() {
+                                        selectedMonth = value;
+                                        selectedDate =
+                                            null; // Clear calendar filter
+                                        _transactionListFuture =
+                                            fetchTransactions(
+                                                month: selectedMonth);
+                                      });
+                                    },
+                                    buttonStyleData: ButtonStyleData(
+                                      height: 40,
+                                      width: 120,
+                                      padding: const EdgeInsets.only(
+                                          left: 14, right: 14),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        border: Border.all(
+                                          color: const Color(0xFFE8E8E8),
+                                          width: 1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      elevation: 0,
+                                    ),
+                                    iconStyleData: const IconStyleData(
+                                      icon: Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                      ),
+                                      iconSize: 22,
+                                      iconEnabledColor:
+                                          Color.fromRGBO(127, 61, 255, 1),
+                                    ),
+                                    dropdownStyleData: DropdownStyleData(
+                                      elevation: 2,
+                                      maxHeight: 200,
+                                      width: 120,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(14),
+                                        color: Colors.white,
+                                      ),
+                                      offset: const Offset(0, 0),
+                                      scrollbarTheme: ScrollbarThemeData(
+                                        radius: const Radius.circular(40),
+                                        thickness:
+                                            WidgetStateProperty.all<double>(6),
+                                        thumbVisibility:
+                                            WidgetStateProperty.all<bool>(true),
+                                      ),
+                                    ),
+                                    menuItemStyleData: const MenuItemStyleData(
+                                      height: 40,
+                                      padding:
+                                          EdgeInsets.only(left: 14, right: 14),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              // Calendar button
+                              GestureDetector(
+                                onTap: () async {
+                                  DateTime now = DateTime.now();
+                                  DateTime? picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: selectedDate ?? now,
+                                    firstDate: DateTime(now.year - 5),
+                                    lastDate: DateTime(now.year + 5),
+                                    builder: (context, child) {
+                                      return Theme(
+                                        data: Theme.of(context).copyWith(
+                                          colorScheme: const ColorScheme.light(
+                                            primary:
+                                                Color.fromRGBO(127, 61, 255, 1),
+                                            onPrimary: Colors.white,
+                                            onSurface: Colors.black,
+                                          ),
+                                          textButtonTheme: TextButtonThemeData(
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Color.fromRGBO(
+                                                  127, 61, 255, 1),
+                                            ),
+                                          ),
+                                        ),
+                                        child: child!,
+                                      );
+                                    },
+                                  );
+                                  if (picked != null) {
+                                    setState(() {
+                                      selectedDate = picked;
+                                      selectedMonth =
+                                          null; // Clear month filter
+                                      _transactionListFuture =
+                                          fetchTransactions(
+                                        filters: selectedFilters,
+                                        specificDate: selectedDate,
+                                      );
+                                    });
+                                  }
                                 },
-                                buttonStyleData: ButtonStyleData(
-                                  height: 40,
-                                  width: 150,
-                                  padding: const EdgeInsets.only(
-                                      left: 14, right: 14),
+                                child: Container(
+                                  padding: const EdgeInsets.all(10),
                                   decoration: BoxDecoration(
-                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
                                       color: const Color(0xFFE8E8E8),
                                       width: 1,
                                     ),
-                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.07),
+                                        spreadRadius: 0,
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
                                   ),
-                                  elevation: 0,
-                                ),
-                                iconStyleData: const IconStyleData(
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
+                                  child: const Icon(
+                                    Icons.calendar_today_rounded,
+                                    size: 20,
+                                    color: Color.fromARGB(255, 0, 0, 0),
                                   ),
-                                  iconSize: 22,
-                                  iconEnabledColor:
-                                      Color.fromRGBO(127, 61, 255, 1),
-                                ),
-                                dropdownStyleData: DropdownStyleData(
-                                  elevation: 2,
-                                  maxHeight: 200,
-                                  width: 150,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(14),
-                                    color: Colors.white,
-                                  ),
-                                  offset: const Offset(0, 0),
-                                  scrollbarTheme: ScrollbarThemeData(
-                                    radius: const Radius.circular(40),
-                                    thickness:
-                                        WidgetStateProperty.all<double>(6),
-                                    thumbVisibility:
-                                        WidgetStateProperty.all<bool>(true),
-                                  ),
-                                ),
-                                menuItemStyleData: const MenuItemStyleData(
-                                  height: 40,
-                                  padding: EdgeInsets.only(left: 14, right: 14),
                                 ),
                               ),
-                            ),
+                              // Show selected date as a pill with clear button
+                              if (selectedDate != null) ...[
+                                const SizedBox(width: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color.fromRGBO(
+                                        127, 61, 255, 0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        DateFormat('MMM d, yyyy')
+                                            .format(selectedDate!),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                          color:
+                                              Color.fromRGBO(127, 61, 255, 1),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            selectedDate = null;
+                                            _transactionListFuture =
+                                                fetchTransactions(
+                                              filters: selectedFilters,
+                                              month: selectedMonth,
+                                            );
+                                          });
+                                        },
+                                        child: const Icon(Icons.clear,
+                                            size: 16, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-
                           // Filter button
                           Stack(
                             children: [
@@ -740,7 +841,9 @@ class _TransactionpageState extends State<Transactionpage> {
                                           selectedFilters = filters;
                                           _transactionListFuture =
                                               fetchTransactions(
-                                                  filters: filters);
+                                                  filters: filters,
+                                                  month: selectedMonth,
+                                                  specificDate: selectedDate);
                                           selectedFiltersCount = filters.values
                                               .where((isSelected) => isSelected)
                                               .length;
@@ -808,6 +911,7 @@ class _TransactionpageState extends State<Transactionpage> {
                             topRight: Radius.circular(20),
                           ),
                         ),
+                        // Remove swipe-to-refresh: use FutureBuilder directly
                         child: FutureBuilder<List<Transaction>>(
                           future: _transactionListFuture,
                           builder: (context, snapshot) {
@@ -846,14 +950,10 @@ class _TransactionpageState extends State<Transactionpage> {
                               );
                             }
 
-                            // Sort transactions by date and then by time
+                            // Sort transactions by date (which includes time)
                             final transactions = snapshot.data!;
-                            transactions.sort((a, b) {
-                              int dateComparison = b.date.compareTo(a.date);
-                              return dateComparison == 0
-                                  ? b.time.compareTo(a.time)
-                                  : dateComparison;
-                            });
+                            transactions
+                                .sort((a, b) => b.date.compareTo(a.date));
 
                             return ListView.builder(
                               padding: const EdgeInsets.all(10),
@@ -1028,6 +1128,15 @@ class _TransactionpageState extends State<Transactionpage> {
                               ),
                             ),
                           ],
+                          // Show date below description/tax
+                          const SizedBox(height: 5),
+                          Text(
+                            DateFormat('MMM d, yyyy').format(transaction.date),
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
                     ),
