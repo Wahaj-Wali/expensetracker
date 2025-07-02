@@ -108,6 +108,15 @@ class TransactionController {
       DocumentSnapshot transactionSnapshot = transactionQuery.docs.first;
       var transactionData = transactionSnapshot.data() as Map<String, dynamic>;
 
+      // Check if this is a split bill transaction
+      if (transactionData['is_split_bill'] == true) {
+        return {
+          'success': false,
+          'message':
+              "Cannot delete split bill transaction directly. Please delete the split bill instead.",
+        };
+      }
+
       // Get transaction details
       String transactionType = transactionData['transaction_type'];
 
@@ -284,5 +293,112 @@ class TransactionController {
       'success': true,
       'message': "Transfer transaction deleted successfully.",
     };
+  }
+
+  /// Get all transactions including split bill transactions
+  Future<List<Map<String, dynamic>>> getAllTransactions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        throw Exception("User email not found in preferences.");
+      }
+
+      QuerySnapshot querySnapshot = await _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email)
+          .orderBy('created_at', descending: true)
+          .get();
+
+      return querySnapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+    } catch (e) {
+      print("Error getting all transactions: $e");
+      return [];
+    }
+  }
+
+  /// Get transactions by type (including split bill filter)
+  Future<List<Map<String, dynamic>>> getTransactionsByType({
+    String? transactionType,
+    bool? isSplitBill,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        throw Exception("User email not found in preferences.");
+      }
+
+      Query query = _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email);
+
+      if (transactionType != null) {
+        query = query.where('transaction_type', isEqualTo: transactionType);
+      }
+
+      if (isSplitBill != null) {
+        query = query.where('is_split_bill', isEqualTo: isSplitBill);
+      }
+
+      QuerySnapshot querySnapshot =
+          await query.orderBy('created_at', descending: true).get();
+
+      return querySnapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+    } catch (e) {
+      print("Error getting transactions by type: $e");
+      return [];
+    }
+  }
+
+  /// Get transaction statistics including split bill stats
+  Future<Map<String, dynamic>> getTransactionStats() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        throw Exception("User email not found in preferences.");
+      }
+
+      QuerySnapshot querySnapshot = await _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email)
+          .get();
+
+      List<Map<String, dynamic>> transactions = querySnapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+
+      int totalTransactions = transactions.length;
+      int expenseTransactions =
+          transactions.where((t) => t['transaction_type'] == 'Expense').length;
+      int incomeTransactions =
+          transactions.where((t) => t['transaction_type'] == 'Income').length;
+      int transferTransactions =
+          transactions.where((t) => t['transaction_type'] == 'Transfer').length;
+      int splitBillTransactions =
+          transactions.where((t) => t['is_split_bill'] == true).length;
+
+      return {
+        'total_transactions': totalTransactions,
+        'expense_transactions': expenseTransactions,
+        'income_transactions': incomeTransactions,
+        'transfer_transactions': transferTransactions,
+        'split_bill_transactions': splitBillTransactions,
+      };
+    } catch (e) {
+      print("Error getting transaction stats: $e");
+      return {
+        'total_transactions': 0,
+        'expense_transactions': 0,
+        'income_transactions': 0,
+        'transfer_transactions': 0,
+        'split_bill_transactions': 0,
+      };
+    }
   }
 }
