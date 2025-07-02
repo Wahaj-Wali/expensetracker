@@ -28,6 +28,7 @@ class CustomFilterModal extends StatefulWidget {
 class _CustomFilterModalState extends State<CustomFilterModal> {
   late Map<String, bool> selectedFilters;
   List<String> categories = [];
+  bool isLoading = true;
 
   @override
   void initState() {
@@ -40,29 +41,41 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
     };
     // If initialFilters provided, override defaults
     if (widget.initialFilters != null) {
-      for (var entry in widget.initialFilters!.entries) {
-        selectedFilters[entry.key] = entry.value;
-      }
+      selectedFilters.addAll(widget.initialFilters!);
     }
     fetchCategories();
   }
 
   Future<void> fetchCategories() async {
-    // Fetch from global_categories instead of user-specific categories
-    final snapshot = await FirebaseFirestore.instance
-        .collection('global_categories')
-        .orderBy('name')
-        .get();
+    try {
+      // Only fetch global categories
+      final globalSnapshot = await FirebaseFirestore.instance
+          .collection('global_categories')
+          .orderBy('name')
+          .get();
 
-    setState(() {
-      categories = snapshot.docs.map((doc) => doc['name'] as String).toList();
-      // Add dynamic categories to filter map if not present
-      for (var category in categories) {
-        if (!selectedFilters.containsKey(category)) {
-          selectedFilters[category] = false;
+      List<String> globalCategories =
+          globalSnapshot.docs.map((doc) => doc['name'] as String).toList();
+
+      Set<String> allCategories = {...globalCategories};
+
+      setState(() {
+        categories = allCategories.toList()..sort();
+        // Add dynamic categories to filter map if not present
+        for (var category in categories) {
+          if (!selectedFilters.containsKey(category)) {
+            selectedFilters[category] =
+                widget.initialFilters?[category] ?? false;
+          }
         }
-      }
-    });
+        isLoading = false;
+      });
+    } catch (e) {
+      print("Error fetching categories: $e");
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   void _onFilterChipTapped(String filter) {
@@ -144,7 +157,7 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                _buildSectionHeader('Filter By'),
+                _buildSectionHeader('Transaction Type'),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8.0,
@@ -155,22 +168,30 @@ class _CustomFilterModalState extends State<CustomFilterModal> {
                     _buildFilterChip('Split Bills'),
                   ],
                 ),
-                const SizedBox(height: 40),
-                _buildSectionHeader('Category'),
+                const SizedBox(height: 20),
+                _buildSectionHeader('Categories'),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8.0,
-                  runSpacing: 8.0,
-                  children: categories
-                      .map((category) => _buildFilterChip(category))
-                      .toList(),
-                ),
+                if (isLoading)
+                  const Center(child: CircularProgressIndicator())
+                else if (categories.isEmpty)
+                  const Text(
+                    'No categories available',
+                    style: TextStyle(color: Colors.grey),
+                  )
+                else
+                  Wrap(
+                    spacing: 8.0,
+                    runSpacing: 8.0,
+                    children: categories
+                        .map((category) => _buildFilterChip(category))
+                        .toList(),
+                  ),
                 const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'Choose Category',
+                      'Filters Selected',
                       style:
                           TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                     ),
@@ -369,13 +390,19 @@ class _TransactionpageState extends State<Transactionpage> {
     super.initState();
     _salesTaxController = SalesTaxController(); // Initialize the controller
 
+    // Set selectedMonth to current month
+    final now = DateTime.now();
+    selectedMonth = months[now.month - 1];
+    selectedDate = null; // No date filter by default
+
     // Apply initial filter if provided
     if (widget.initialFilter != null) {
       selectedFilters[widget.initialFilter!] = true;
       selectedFiltersCount = 1;
     }
 
-    _transactionListFuture = fetchTransactions(filters: selectedFilters);
+    _transactionListFuture =
+        fetchTransactions(filters: selectedFilters, month: selectedMonth);
   }
 
   final List<String> months = [
@@ -395,7 +422,7 @@ class _TransactionpageState extends State<Transactionpage> {
   String? selectedMonth;
 
   Future<List<Transaction>> fetchTransactions(
-      {Map<String, bool>? filters, String? month}) async {
+      {Map<String, bool>? filters, String? month, DateTime? date}) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? email = prefs.getString('email');
@@ -407,10 +434,10 @@ class _TransactionpageState extends State<Transactionpage> {
 
       CollectionReference transactionsRef =
           FirebaseFirestore.instance.collection('transactions');
-      CollectionReference categoriesRef =
-          FirebaseFirestore.instance.collection('categories');
       CollectionReference splitBillsRef =
           FirebaseFirestore.instance.collection('split_bills');
+      CollectionReference globalCategoriesRef =
+          FirebaseFirestore.instance.collection('global_categories');
 
       Query query = transactionsRef.where('email', isEqualTo: email);
 
@@ -432,12 +459,13 @@ class _TransactionpageState extends State<Transactionpage> {
           }
         });
 
-        // Split Bills filter logic
-        if (includeSplitBills &&
-            transactionTypes.isEmpty &&
-            categories.isEmpty) {
-          query = query.where('is_split_bill', isEqualTo: true);
-        } else if (!includeSplitBills) {
+        // Only filter by is_split_bill if Split Bills is toggled
+        if (includeSplitBills) {
+          if (transactionTypes.isEmpty && categories.isEmpty) {
+            query = query.where('is_split_bill', isEqualTo: true);
+          }
+          // else: do not filter by is_split_bill, include all
+        } else {
           query = query.where('is_split_bill', isEqualTo: false);
         }
 
@@ -449,9 +477,20 @@ class _TransactionpageState extends State<Transactionpage> {
           query = query.where('category_name', whereIn: categories);
         }
       }
+      // else: no filters, include all transactions (including split bills)
 
-      // Add month-based filtering
-      if (month != null && month.isNotEmpty) {
+      // Add date-based filtering (overrides month if set)
+      if (date != null) {
+        DateTime startOfDay =
+            DateTime(date.year, date.month, date.day, 0, 0, 0, 0);
+        DateTime endOfDay =
+            DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+        Timestamp startTimestamp = Timestamp.fromDate(startOfDay);
+        Timestamp endTimestamp = Timestamp.fromDate(endOfDay);
+        query = query
+            .where('timestamp', isGreaterThanOrEqualTo: startTimestamp)
+            .where('timestamp', isLessThanOrEqualTo: endTimestamp);
+      } else if (month != null && month.isNotEmpty) {
         try {
           int monthIndex = _getMonthIndex(month);
           int currentYear = DateTime.now().year;
@@ -476,6 +515,59 @@ class _TransactionpageState extends State<Transactionpage> {
       print(
           "Query executed successfully. Found ${querySnapshot.docs.length} transactions");
 
+      // --- Batch fetch category and split bill data for all transactions ---
+
+      // Collect all category names and split bill IDs
+      Set<String> allCategoryNames = {};
+      Set<String> allSplitBillIds = {};
+      for (var doc in querySnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
+        String? cat = data['category_name']?.toString();
+        if (cat != null && cat.isNotEmpty) allCategoryNames.add(cat);
+        if ((data['is_split_bill'] ?? false) && data['split_bill_id'] != null) {
+          allSplitBillIds.add(data['split_bill_id'].toString());
+        }
+      }
+
+      // Fetch all categories (user and global) in one go
+      List<QuerySnapshot> categorySnaps = await Future.wait([
+        if (allCategoryNames.isNotEmpty)
+          globalCategoriesRef
+              .where('name', whereIn: allCategoryNames.toList())
+              .get(),
+      ]);
+      // Build category lookup map: name -> data
+      Map<String, Map<String, dynamic>> categoryMap = {};
+      for (var snap in categorySnaps) {
+        for (var doc in snap.docs) {
+          final data = doc.data() as Map<String, dynamic>?;
+          if (data != null && data['name'] != null) {
+            categoryMap[data['name'].toString()] = data;
+          }
+        }
+      }
+
+      // Fetch all split bills in one go
+      Map<String, Map<String, dynamic>> splitBillMap = {};
+      if (allSplitBillIds.isNotEmpty) {
+        // Firestore whereIn supports max 10 items, so batch if needed
+        final idsList = allSplitBillIds.toList();
+        for (var i = 0; i < idsList.length; i += 10) {
+          final batchIds = idsList.sublist(
+              i, i + 10 > idsList.length ? idsList.length : i + 10);
+          final snap = await splitBillsRef
+              .where(FieldPath.documentId, whereIn: batchIds)
+              .get();
+          for (var doc in snap.docs) {
+            final data = doc.data() as Map<String, dynamic>?;
+            if (data != null) {
+              splitBillMap[doc.id] = data;
+            }
+          }
+        }
+      }
+
       List<Transaction> transactionList = [];
 
       for (var doc in querySnapshot.docs) {
@@ -483,7 +575,7 @@ class _TransactionpageState extends State<Transactionpage> {
           Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
 
           if (data == null) {
-            print("Warning: Document ${doc.id} has null data");
+            print("Warning: Document \\${doc.id} has null data");
             continue;
           }
 
@@ -491,16 +583,20 @@ class _TransactionpageState extends State<Transactionpage> {
           if (!data.containsKey('transaction_id') ||
               !data.containsKey('transaction_type') ||
               !data.containsKey('amount')) {
-            print("Warning: Document ${doc.id} missing required fields");
+            print("Warning: Document \\${doc.id} missing required fields");
             continue;
           }
 
-          // Get basic transaction data with null safety
-          String title = data['category_name']?.toString() ?? 'No Category';
+          // Skip transactions with no category
+          String categoryName = data['category_name']?.toString() ?? '';
+          if (categoryName.isEmpty) {
+            print("Skipping transaction with no category: \\${doc.id}");
+            continue;
+          }
+
+          String title = categoryName;
           String description = data['description']?.toString() ?? '';
           String id = data['transaction_id']?.toString() ?? doc.id;
-          String categoryName =
-              data['category_name']?.toString() ?? 'No Category';
           bool isSplitBill = data['is_split_bill'] ?? false;
           String? splitBillId = data['split_bill_id']?.toString();
           String transactionType =
@@ -523,36 +619,27 @@ class _TransactionpageState extends State<Transactionpage> {
           String amount =
               '${transactionType == "Income" ? "+" : transactionType == "Expense" ? "-" : "±"} Rs${amountValue.toStringAsFixed(2)}';
 
-          // Get split bill details if applicable
+          // --- Use splitBillMap for split bill details ---
           double? totalSplitAmount;
           int? participantCount;
           if (isSplitBill && splitBillId != null && splitBillId.isNotEmpty) {
-            try {
-              DocumentSnapshot splitBillDoc =
-                  await splitBillsRef.doc(splitBillId).get();
-              if (splitBillDoc.exists) {
-                Map<String, dynamic>? splitBillData =
-                    splitBillDoc.data() as Map<String, dynamic>?;
-                if (splitBillData != null) {
-                  totalSplitAmount = double.tryParse(
-                          splitBillData['total_amount']?.toString() ?? '0') ??
-                      0.0;
-                  List<dynamic> participants =
-                      splitBillData['participants'] ?? [];
-                  participantCount = participants.length + 1; // +1 for the user
-                  String splitDescription =
-                      splitBillData['description']?.toString() ?? 'Split Bill';
-                  description =
-                      'Split Bill: $splitDescription ($participantCount people)';
-                }
-              }
-            } catch (e) {
-              print("Error fetching split bill details for $splitBillId: $e");
+            final splitBillData = splitBillMap[splitBillId];
+            if (splitBillData != null) {
+              totalSplitAmount = double.tryParse(
+                      splitBillData['total_amount']?.toString() ?? '0') ??
+                  0.0;
+              List<dynamic> participants = splitBillData['participants'] ?? [];
+              participantCount = participants.length + 1;
+              String splitDescription =
+                  splitBillData['description']?.toString() ?? 'Split Bill';
+              description =
+                  'Split Bill: $splitDescription ($participantCount people)';
             }
           }
 
-          // Calculate sales tax with error handling
+          // --- Use categoryMap for sales tax and icon ---
           double salesTax = 0.0;
+          String iconName = "";
           try {
             if (data.containsKey('sales_tax_amount')) {
               if (data['sales_tax_amount'] is String) {
@@ -562,38 +649,29 @@ class _TransactionpageState extends State<Transactionpage> {
               }
             } else if (transactionType == 'Expense' &&
                 categoryName.isNotEmpty) {
-              // Fallback tax calculation
-              QuerySnapshot categorySnapshot = await categoriesRef
-                  .where('name', isEqualTo: categoryName)
-                  .limit(1)
-                  .get();
-
-              if (categorySnapshot.docs.isEmpty) {
-                categorySnapshot = await categoriesRef
-                    .where('email', isEqualTo: email)
-                    .where('name', isEqualTo: categoryName)
-                    .limit(1)
-                    .get();
-              }
-
-              if (categorySnapshot.docs.isNotEmpty) {
-                var categoryData =
-                    categorySnapshot.docs.first.data() as Map<String, dynamic>?;
-                if (categoryData != null) {
-                  bool isTaxApplicable =
-                      categoryData['salesTaxApplicable'] ?? false;
-                  if (isTaxApplicable) {
-                    double taxRate = double.tryParse(
-                            categoryData['salesTaxPercentage']?.toString() ??
-                                '0') ??
-                        0.0;
-                    salesTax = (amountValue * taxRate) / 100;
-                  }
+              final categoryData = categoryMap[categoryName];
+              if (categoryData != null) {
+                bool isTaxApplicable =
+                    categoryData['salesTaxApplicable'] ?? false;
+                if (isTaxApplicable) {
+                  double taxRate = double.tryParse(
+                          categoryData['salesTaxPercentage']?.toString() ??
+                              '0') ??
+                      0.0;
+                  salesTax = (amountValue * taxRate) / 100;
                 }
+                iconName = categoryData['iconName']?.toString() ?? '';
               }
             }
           } catch (e) {
             print("Error calculating sales tax for transaction $id: $e");
+          }
+          // If iconName not set, try to get from categoryMap anyway
+          if (iconName.isEmpty && categoryName.isNotEmpty) {
+            final categoryData = categoryMap[categoryName];
+            if (categoryData != null) {
+              iconName = categoryData['iconName']?.toString() ?? '';
+            }
           }
 
           // Handle date and time with better error handling
@@ -614,45 +692,13 @@ class _TransactionpageState extends State<Transactionpage> {
             time = DateFormat('hh:mm a').format(DateTime.now());
           }
 
-          // Get category icon and color with error handling
           IconData icon = Icons.money;
           try {
-            if (isSplitBill) {
-              icon = Icons.group;
-            } else {
-              String iconName = "";
-              Color iconColor = Colors.grey;
-
-              if (categoryName.isNotEmpty) {
-                QuerySnapshot categorySnapshot = await categoriesRef
-                    .where('name', isEqualTo: categoryName)
-                    .limit(1)
-                    .get();
-
-                if (categorySnapshot.docs.isEmpty) {
-                  categorySnapshot = await categoriesRef
-                      .where('email', isEqualTo: email)
-                      .where('name', isEqualTo: categoryName)
-                      .limit(1)
-                      .get();
-                }
-
-                if (categorySnapshot.docs.isNotEmpty) {
-                  var categoryData = categorySnapshot.docs.first.data()
-                      as Map<String, dynamic>?;
-                  if (categoryData != null) {
-                    iconName = categoryData['iconName']?.toString() ?? '';
-                  }
-                }
-              }
-              icon = _flutterIcons[iconName] ?? Icons.money;
-            }
+            icon = _flutterIcons[iconName] ?? Icons.money;
           } catch (e) {
-            print("Error getting category icon for transaction $id: $e");
             icon = Icons.money;
           }
 
-          // Create and add transaction object
           transactionList.add(Transaction(
             title: title,
             description: description,
@@ -671,7 +717,6 @@ class _TransactionpageState extends State<Transactionpage> {
           ));
         } catch (e) {
           print("Error processing transaction document ${doc.id}: $e");
-          // Continue with next transaction instead of failing completely
           continue;
         }
       }
@@ -680,7 +725,6 @@ class _TransactionpageState extends State<Transactionpage> {
       return transactionList;
     } catch (e) {
       print("Error fetching transactions: $e");
-      // Return empty list instead of throwing error to prevent app crash
       return [];
     }
   }
@@ -795,40 +839,43 @@ class _TransactionpageState extends State<Transactionpage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Month dropdown
-                        Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                spreadRadius: 0,
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton2<String>(
-                              isExpanded: true,
-                              hint: const Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'Month',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.black,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                        // Month dropdown and calendar button together
+                        Row(
+                          children: [
+                            // Month dropdown
+                            Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    spreadRadius: 0,
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
                                   ),
                                 ],
                               ),
-                              items: months
-                                  .map(
-                                      (String item) => DropdownMenuItem<String>(
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton2<String>(
+                                  isExpanded: true,
+                                  hint: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          selectedMonth ?? 'Month',
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.black,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  items: months
+                                      .map((String item) =>
+                                          DropdownMenuItem<String>(
                                             value: item,
                                             child: Text(
                                               item,
@@ -840,61 +887,113 @@ class _TransactionpageState extends State<Transactionpage> {
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ))
-                                  .toList(),
-                              value: selectedMonth,
-                              onChanged: (String? value) {
-                                setState(() {
-                                  selectedMonth = value;
-                                  // Pass both filters and month!
-                                  _transactionListFuture = fetchTransactions(
-                                    filters: selectedFilters,
-                                    month: selectedMonth,
-                                  );
-                                });
-                              },
-                              buttonStyleData: ButtonStyleData(
-                                height: 40,
-                                width: 150,
-                                padding:
-                                    const EdgeInsets.only(left: 14, right: 14),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  border: Border.all(
-                                    color: const Color(0xFFE8E8E8),
-                                    width: 1,
+                                      .toList(),
+                                  value: selectedMonth,
+                                  onChanged: (String? value) {
+                                    setState(() {
+                                      selectedMonth = value;
+                                      selectedDate =
+                                          null; // Clear date filter if month is changed
+                                      _transactionListFuture =
+                                          fetchTransactions(
+                                              filters: selectedFilters,
+                                              month: selectedMonth,
+                                              date: null);
+                                    });
+                                  },
+                                  buttonStyleData: ButtonStyleData(
+                                    height: 40,
+                                    width: 150,
+                                    padding: const EdgeInsets.only(
+                                        left: 14, right: 14),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      border: Border.all(
+                                        color: const Color(0xFFE8E8E8),
+                                        width: 1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    elevation: 0,
                                   ),
-                                  borderRadius: BorderRadius.circular(20),
+                                  iconStyleData: const IconStyleData(
+                                    icon:
+                                        Icon(Icons.keyboard_arrow_down_rounded),
+                                    iconSize: 22,
+                                    iconEnabledColor:
+                                        Color.fromRGBO(127, 61, 255, 1),
+                                  ),
+                                  dropdownStyleData: DropdownStyleData(
+                                    elevation: 2,
+                                    maxHeight: 200,
+                                    width: 150,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(14),
+                                      color: Colors.white,
+                                    ),
+                                    offset: const Offset(0, 0),
+                                    scrollbarTheme: ScrollbarThemeData(
+                                      radius: const Radius.circular(40),
+                                      thickness:
+                                          WidgetStateProperty.all<double>(6),
+                                      thumbVisibility:
+                                          WidgetStateProperty.all<bool>(true),
+                                    ),
+                                  ),
+                                  menuItemStyleData: const MenuItemStyleData(
+                                    height: 40,
+                                    padding:
+                                        EdgeInsets.only(left: 14, right: 14),
+                                  ),
                                 ),
-                                elevation: 0,
-                              ),
-                              iconStyleData: const IconStyleData(
-                                icon: Icon(Icons.keyboard_arrow_down_rounded),
-                                iconSize: 22,
-                                iconEnabledColor:
-                                    Color.fromRGBO(127, 61, 255, 1),
-                              ),
-                              dropdownStyleData: DropdownStyleData(
-                                elevation: 2,
-                                maxHeight: 200,
-                                width: 150,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(14),
-                                  color: Colors.white,
-                                ),
-                                offset: const Offset(0, 0),
-                                scrollbarTheme: ScrollbarThemeData(
-                                  radius: const Radius.circular(40),
-                                  thickness: WidgetStateProperty.all<double>(6),
-                                  thumbVisibility:
-                                      WidgetStateProperty.all<bool>(true),
-                                ),
-                              ),
-                              menuItemStyleData: const MenuItemStyleData(
-                                height: 40,
-                                padding: EdgeInsets.only(left: 14, right: 14),
                               ),
                             ),
-                          ),
+                            // Calendar icon button (with purple badge if selectedDate != null)
+                            Stack(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.calendar_today_rounded,
+                                      color: Colors.black),
+                                  tooltip: 'Pick a date',
+                                  onPressed: () async {
+                                    DateTime now = DateTime.now();
+                                    final DateTime? picked =
+                                        await showDatePicker(
+                                      context: context,
+                                      initialDate: selectedDate ?? now,
+                                      firstDate: DateTime(now.year - 5),
+                                      lastDate: DateTime(now.year + 5),
+                                    );
+                                    if (picked != null) {
+                                      setState(() {
+                                        selectedDate = picked;
+                                        selectedMonth =
+                                            null; // Clear month filter if date is picked
+                                        _transactionListFuture =
+                                            fetchTransactions(
+                                          filters: selectedFilters,
+                                          date: selectedDate,
+                                        );
+                                      });
+                                    }
+                                  },
+                                ),
+                                if (selectedDate != null)
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Container(
+                                      height: 10,
+                                      width: 10,
+                                      decoration: BoxDecoration(
+                                        color: Color.fromRGBO(127, 61, 255, 1),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ),
 
                         // Filter button with badge
@@ -909,12 +1008,8 @@ class _TransactionpageState extends State<Transactionpage> {
                                     onApplyFilters: (filters) {
                                       setState(() {
                                         selectedFilters = filters;
-                                        // Pass both filters and month!
                                         _transactionListFuture =
-                                            fetchTransactions(
-                                          filters: filters,
-                                          month: selectedMonth,
-                                        );
+                                            fetchTransactions(filters: filters);
                                         selectedFiltersCount = filters.values
                                             .where((isSelected) => isSelected)
                                             .length;
@@ -1093,8 +1188,19 @@ class _TransactionpageState extends State<Transactionpage> {
     bool isTaxableExpense =
         transaction.transactionType == "Expense" && transaction.salesTax > 0;
 
-    // Debug: print sales tax for each transaction
-    // print("Transaction: ${transaction.title}, salesTax: ${transaction.salesTax}");
+    // Restore color logic for icon background and icon color
+    Color iconBgColor;
+    Color iconColor;
+    if (transaction.isSplitBill) {
+      iconBgColor = const Color.fromRGBO(127, 61, 255, 1).withOpacity(0.1);
+      iconColor = const Color.fromRGBO(127, 61, 255, 1);
+    } else if (transaction.transactionType == "Income") {
+      iconBgColor = const Color.fromRGBO(0, 168, 107, 1).withOpacity(0.1);
+      iconColor = const Color.fromRGBO(0, 168, 107, 1);
+    } else {
+      iconBgColor = const Color.fromRGBO(253, 60, 74, 1).withOpacity(0.1);
+      iconColor = const Color.fromRGBO(253, 60, 74, 1);
+    }
 
     return GestureDetector(
         onTap: () {
@@ -1130,33 +1236,50 @@ class _TransactionpageState extends State<Transactionpage> {
             child: Column(
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Icon section with split bill indicator
-                    Container(
-                      height: 55,
-                      width: 55,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        color: transaction.isSplitBill
-                            ? const Color.fromRGBO(127, 61, 255, 1)
-                                .withOpacity(0.1)
-                            : transaction.transactionType == "Income"
-                                ? const Color.fromRGBO(0, 168, 107, 1)
-                                    .withOpacity(0.1)
-                                : const Color.fromRGBO(253, 60, 74, 1)
-                                    .withOpacity(0.1),
-                      ),
-                      child: Icon(
-                        transaction.isSplitBill
-                            ? Icons.group
-                            : transaction.icon,
-                        color: transaction.isSplitBill
-                            ? const Color.fromRGBO(127, 61, 255, 1)
-                            : transaction.transactionType == "Income"
-                                ? const Color.fromRGBO(0, 168, 107, 1)
-                                : const Color.fromRGBO(253, 60, 74, 1),
-                        size: 30,
-                      ),
+                    // Icon section with badge below
+                    Column(
+                      children: [
+                        Container(
+                          height: 55,
+                          width: 55,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            color: iconBgColor,
+                          ),
+                          child: Icon(
+                            transaction.icon,
+                            color: iconColor,
+                            size: 30,
+                          ),
+                        ),
+                        if (isTaxableExpense)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color.fromRGBO(253, 60, 74, 1)
+                                    .withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color.fromRGBO(253, 60, 74, 1),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                'Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  color: Color.fromRGBO(253, 60, 74, 1),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(width: 15),
                     Expanded(
@@ -1200,15 +1323,18 @@ class _TransactionpageState extends State<Transactionpage> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              // Move date to the right, show in place
                               Text(
-                                transaction.time,
+                                DateFormat('MMM d, yyyy')
+                                    .format(transaction.date),
                                 style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 14,
+                                  color: Colors.black54,
+                                  fontSize: 13,
                                 ),
                               ),
                             ],
                           ),
+                          // ...existing code...
                           if (transaction.isSplitBill &&
                               transaction.totalSplitAmount != null)
                             Padding(
@@ -1227,22 +1353,7 @@ class _TransactionpageState extends State<Transactionpage> {
                     ),
                   ],
                 ),
-                if (isTaxableExpense)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Text(
-                          'Sales Tax: Rs${transaction.salesTax.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                // ...existing code...
               ],
             ),
           ),
