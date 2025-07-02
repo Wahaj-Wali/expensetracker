@@ -2,11 +2,13 @@ import 'package:ExpenseTracker/Services/BudgetNotificationService.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
 
 class BudgetController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<void> updateSpendAmount(double amount, String categoryName) async {
+  /// Update spend amount for a specific budget by name
+  Future<void> updateSpendAmount(double amount, String budgetName) async {
     try {
       // Retrieve email from shared preferences
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -14,104 +16,56 @@ class BudgetController {
 
       if (email == null) {
         debugPrint("Email not found in shared preferences.");
-        return; // Exit if email is not found
+        return;
       }
 
-      // First, try to find the category in user-specific categories
-      QuerySnapshot userCategorySnapshot = await _firestore
-          .collection('categories')
+      // Find the budget by name for the current user
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
           .where('email', isEqualTo: email)
-          .where('name', isEqualTo: categoryName)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
           .limit(1)
           .get();
 
-      DocumentReference? categoryDoc;
-      bool isUserCategory = false;
-
-      if (userCategorySnapshot.docs.isNotEmpty) {
-        // Found in user-specific categories
-        categoryDoc = userCategorySnapshot.docs.first.reference;
-        isUserCategory = true;
-      } else {
-        // Check if it's a global category and create a user-specific budget entry
-        QuerySnapshot globalCategorySnapshot = await _firestore
-            .collection('global_categories')
-            .where('name', isEqualTo: categoryName)
-            .limit(1)
-            .get();
-
-        if (globalCategorySnapshot.docs.isNotEmpty) {
-          // Create a user-specific category entry for budget tracking
-          var globalCategoryData =
-              globalCategorySnapshot.docs.first.data() as Map<String, dynamic>;
-
-          // Create new user category document for budget tracking
-          DocumentReference newCategoryDoc =
-              _firestore.collection('categories').doc();
-
-          await newCategoryDoc.set({
-            'email': email,
-            'name': categoryName,
-            'iconName': globalCategoryData['iconName'],
-            'iconColor': globalCategoryData['iconColor'],
-            'is_default': globalCategoryData['is_default'] ?? true,
-            'salesTaxApplicable':
-                globalCategoryData['salesTaxApplicable'] ?? true,
-            'salesTaxPercentage':
-                globalCategoryData['salesTaxPercentage'] ?? 18.0,
-            'spend': amount, // Initialize with the current spend amount
-            'created_at': FieldValue.serverTimestamp(),
-          });
-
-          debugPrint(
-              "Created user-specific category for budget tracking: $categoryName");
-          return;
-        } else {
-          debugPrint(
-              "Category not found in both user and global categories: $categoryName");
-          return;
-        }
+      if (budgetSnapshot.docs.isEmpty) {
+        debugPrint("Budget not found: $budgetName");
+        return;
       }
 
-      // Update the spend amount for existing user category
-      if (categoryDoc != null) {
-        // Retrieve document snapshot
-        DocumentSnapshot categorySnapshot = await categoryDoc.get();
-        var categoryData = categorySnapshot.data() as Map<String, dynamic>?;
+      DocumentReference budgetDoc = budgetSnapshot.docs.first.reference;
+      DocumentSnapshot budgetDocSnapshot = await budgetDoc.get();
+      var budgetData = budgetDocSnapshot.data() as Map<String, dynamic>;
 
-        if (categoryData == null) {
-          debugPrint("Category data not found.");
-          return;
-        }
+      // Get current spend amount, defaulting to 0 if not present
+      num currentSpend = budgetData['spend'] ?? 0;
+      double updatedSpend = currentSpend.toDouble() + amount;
 
-        // Get current spend amount, defaulting to 0 if not present
-        num currentSpend = categoryData['spend'] ?? 0;
-        double updatedSpend = currentSpend.toDouble() + amount;
+      // Update the spend field
+      await budgetDoc.update({
+        'spend': updatedSpend,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
 
-        // Update the spend field
-        await categoryDoc.update({'spend': updatedSpend});
+      debugPrint("Spend updated successfully for budget: $budgetName");
 
-        debugPrint(
-            "Spend updated successfully for ${isUserCategory ? 'user' : 'global'} category: $categoryName");
-
-        // **NEW: Check for budget alerts after updating spend**
-        await _checkBudgetAlerts(categoryData, updatedSpend, categoryName);
-      }
+      // Check for budget alerts after updating spend
+      await _checkBudgetAlerts(budgetData, updatedSpend, budgetName);
     } catch (e) {
       debugPrint("Error updating spend amount: $e");
     }
   }
 
-  /// **NEW METHOD: Check if budget alerts should be triggered**
-  Future<void> _checkBudgetAlerts(Map<String, dynamic> categoryData,
-      double newSpendAmount, String categoryName) async {
+  /// Check if budget alerts should be triggered
+  Future<void> _checkBudgetAlerts(Map<String, dynamic> budgetData,
+      double newSpendAmount, String budgetName) async {
     try {
-      final balance = (categoryData['balance'] as num?)?.toDouble() ?? 0.0;
-      final isAlert = categoryData['is_alert'] as bool? ?? false;
+      final balance = (budgetData['budget_limit'] as num?)?.toDouble() ?? 0.0;
+      final isAlert = budgetData['is_alert'] as bool? ?? false;
       final alertPercentage =
-          (categoryData['alert_percentage'] as num?)?.toDouble() ?? 80.0;
-      final alertMessage =
-          categoryData['alert_msg'] as String? ?? "You've exceeded the limit!";
+          (budgetData['alert_percentage'] as num?)?.toDouble() ?? 80.0;
+      final alertMessage = budgetData['alert_msg'] as String? ??
+          "You've exceeded your budget limit!";
 
       // Skip if no budget is set or alerts are disabled
       if (balance <= 0 || !isAlert) return;
@@ -120,16 +74,19 @@ class BudgetController {
 
       if (newSpendAmount >= balance) {
         await BudgetNotificationService.showBudgetExceededNotification(
-          categoryName: categoryName,
+          categoryName: budgetName,
           spentAmount: newSpendAmount,
           budgetAmount: balance,
           alertMessage: alertMessage,
         );
+
+        // Mark budget as reached
+        await _markBudgetAsReached(budgetName, true);
       }
       // Check if approaching budget limit
       else if (spendPercentage >= alertPercentage) {
         await BudgetNotificationService.showBudgetWarningNotification(
-          categoryName: categoryName,
+          categoryName: budgetName,
           spentAmount: newSpendAmount,
           budgetAmount: balance,
           warningPercentage: spendPercentage,
@@ -137,14 +94,104 @@ class BudgetController {
       }
 
       debugPrint(
-          "Budget check completed for $categoryName: ${spendPercentage.toStringAsFixed(1)}% used");
+          "Budget check completed for $budgetName: ${spendPercentage.toStringAsFixed(1)}% used");
     } catch (e) {
       debugPrint("Error checking budget alerts: $e");
     }
   }
 
-  /// Get budget information for a specific category
-  Future<Map<String, dynamic>?> getCategoryBudget(String categoryName) async {
+  /// Mark budget as reached or not reached
+  Future<void> _markBudgetAsReached(String budgetName, bool isReached) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) return;
+
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (budgetSnapshot.docs.isNotEmpty) {
+        await budgetSnapshot.docs.first.reference.update({
+          'is_reached': isReached,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        });
+      }
+    } catch (e) {
+      debugPrint("Error marking budget as reached: $e");
+    }
+  }
+
+  /// Create a new budget
+  Future<bool> createBudget({
+    required String budgetName,
+    required double budgetLimit,
+    required String period, // 'monthly', 'weekly', 'yearly'
+    String? description,
+    bool isAlert = true,
+    double alertPercentage = 80.0,
+    String? alertMessage,
+  }) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) {
+        debugPrint("Email not found in shared preferences.");
+        return false;
+      }
+
+      // Check if budget with same name already exists
+      QuerySnapshot existingBudget = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (existingBudget.docs.isNotEmpty) {
+        debugPrint("Budget with name '$budgetName' already exists");
+        return false;
+      }
+
+      var uuid = const Uuid();
+      String budgetId = uuid.v4();
+
+      await _firestore.collection('budgets').doc(budgetId).set({
+        'budget_id': budgetId,
+        'budget_name': budgetName,
+        'description': description ?? '',
+        'budget_limit': budgetLimit,
+        'spend': 0.0,
+        'period': period,
+        'is_alert': isAlert,
+        'alert_percentage': alertPercentage,
+        'alert_msg': alertMessage ?? "You've exceeded your budget limit!",
+        'is_reached': false,
+        'is_active': true,
+        'email': email,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'current_month': DateTime.now().month,
+        'current_year': DateTime.now().year,
+      });
+
+      debugPrint("Budget '$budgetName' created successfully");
+      return true;
+    } catch (e) {
+      debugPrint("Error creating budget: $e");
+      return false;
+    }
+  }
+
+  /// Get budget information for a specific budget name
+  Future<Map<String, dynamic>?> getBudgetByName(String budgetName) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? email = prefs.getString('email');
@@ -154,71 +201,46 @@ class BudgetController {
         return null;
       }
 
-      // Check user-specific categories first
-      QuerySnapshot userCategorySnapshot = await _firestore
-          .collection('categories')
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
           .where('email', isEqualTo: email)
-          .where('name', isEqualTo: categoryName)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
           .limit(1)
           .get();
 
-      if (userCategorySnapshot.docs.isNotEmpty) {
-        var doc = userCategorySnapshot.docs.first;
+      if (budgetSnapshot.docs.isNotEmpty) {
+        var doc = budgetSnapshot.docs.first;
         var data = doc.data() as Map<String, dynamic>;
 
         return {
           'id': doc.id,
-          'name': data['name'],
-          'iconName': data['iconName'],
-          'iconColor': data['iconColor'],
-          'balance': data['balance'],
+          'budget_id': data['budget_id'],
+          'budget_name': data['budget_name'],
+          'description': data['description'] ?? '',
+          'budget_limit': data['budget_limit'],
           'spend': data['spend'] ?? 0,
+          'period': data['period'],
           'current_month': data['current_month'],
+          'current_year': data['current_year'],
           'is_alert': data['is_alert'] ?? false,
           'alert_percentage': data['alert_percentage'],
           'alert_msg': data['alert_msg'],
           'is_reached': data['is_reached'] ?? false,
-          'has_budget': data.containsKey('balance'), // Check if budget is set
-        };
-      }
-
-      // If not found in user categories, check global categories
-      QuerySnapshot globalCategorySnapshot = await _firestore
-          .collection('global_categories')
-          .where('name', isEqualTo: categoryName)
-          .limit(1)
-          .get();
-
-      if (globalCategorySnapshot.docs.isNotEmpty) {
-        var doc = globalCategorySnapshot.docs.first;
-        var data = doc.data() as Map<String, dynamic>;
-
-        return {
-          'id': doc.id,
-          'name': data['name'],
-          'iconName': data['iconName'],
-          'iconColor': data['iconColor'],
-          'balance': null, // No budget set for global categories
-          'spend': 0,
-          'current_month': null,
-          'is_alert': false,
-          'alert_percentage': null,
-          'alert_msg': null,
-          'is_reached': false,
-          'has_budget':
-              false, // Global categories don't have budgets by default
+          'created_at': data['created_at'],
+          'updated_at': data['updated_at'],
         };
       }
 
       return null;
     } catch (e) {
-      debugPrint("Error getting category budget: $e");
+      debugPrint("Error getting budget by name: $e");
       return null;
     }
   }
 
-  /// Get all categories with budget information
-  Future<List<Map<String, dynamic>>> getAllCategoriesWithBudgets() async {
+  /// Get all budgets for current user
+  Future<List<Map<String, dynamic>>> getAllBudgets() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? email = prefs.getString('email');
@@ -228,104 +250,185 @@ class BudgetController {
         return [];
       }
 
-      List<Map<String, dynamic>> allCategories = [];
-
-      // Get user-specific categories
-      QuerySnapshot userCategoriesSnapshot = await _firestore
-          .collection('categories')
+      QuerySnapshot budgetsSnapshot = await _firestore
+          .collection('budgets')
           .where('email', isEqualTo: email)
+          .where('is_active', isEqualTo: true)
+          .orderBy('budget_name')
           .get();
 
-      Set<String> userCategoryNames = {};
+      List<Map<String, dynamic>> budgets = [];
 
-      for (var doc in userCategoriesSnapshot.docs) {
+      for (var doc in budgetsSnapshot.docs) {
         var data = doc.data() as Map<String, dynamic>;
-        userCategoryNames.add(data['name']);
-
-        allCategories.add({
+        budgets.add({
           'id': doc.id,
-          'name': data['name'],
-          'iconName': data['iconName'],
-          'iconColor': data['iconColor'],
-          'balance': data['balance'],
+          'budget_id': data['budget_id'],
+          'budget_name': data['budget_name'],
+          'description': data['description'] ?? '',
+          'budget_limit': data['budget_limit'],
           'spend': data['spend'] ?? 0,
+          'period': data['period'],
           'current_month': data['current_month'],
+          'current_year': data['current_year'],
           'is_alert': data['is_alert'] ?? false,
           'alert_percentage': data['alert_percentage'],
           'alert_msg': data['alert_msg'],
           'is_reached': data['is_reached'] ?? false,
-          'has_budget': data.containsKey('balance'),
-          'is_global': false,
+          'created_at': data['created_at'],
+          'updated_at': data['updated_at'],
         });
       }
 
-      // Get global categories that are not overridden by user categories
-      QuerySnapshot globalCategoriesSnapshot =
-          await _firestore.collection('global_categories').get();
-
-      for (var doc in globalCategoriesSnapshot.docs) {
-        var data = doc.data() as Map<String, dynamic>;
-        String categoryName = data['name'];
-
-        // Only add if not already present in user categories
-        if (!userCategoryNames.contains(categoryName)) {
-          allCategories.add({
-            'id': doc.id,
-            'name': categoryName,
-            'iconName': data['iconName'],
-            'iconColor': data['iconColor'],
-            'balance': null,
-            'spend': 0,
-            'current_month': null,
-            'is_alert': false,
-            'alert_percentage': null,
-            'alert_msg': null,
-            'is_reached': false,
-            'has_budget': false,
-            'is_global': true,
-          });
-        }
-      }
-
-      return allCategories;
+      return budgets;
     } catch (e) {
-      debugPrint("Error getting all categories with budgets: $e");
+      debugPrint("Error getting all budgets: $e");
       return [];
     }
   }
 
-  /// Check if a category has exceeded its budget
-  Future<bool> isBudgetExceeded(String categoryName) async {
+  /// Update budget
+  Future<bool> updateBudget({
+    required String budgetName,
+    String? newBudgetName,
+    double? budgetLimit,
+    String? period,
+    String? description,
+    bool? isAlert,
+    double? alertPercentage,
+    String? alertMessage,
+  }) async {
     try {
-      var budgetInfo = await getCategoryBudget(categoryName);
-      if (budgetInfo == null || !budgetInfo['has_budget']) {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) {
+        debugPrint("Email not found in shared preferences.");
         return false;
       }
 
-      double balance = budgetInfo['balance']?.toDouble() ?? 0;
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (budgetSnapshot.docs.isEmpty) {
+        debugPrint("Budget not found: $budgetName");
+        return false;
+      }
+
+      // Check if new name already exists (if changing name)
+      if (newBudgetName != null && newBudgetName != budgetName) {
+        QuerySnapshot existingBudget = await _firestore
+            .collection('budgets')
+            .where('email', isEqualTo: email)
+            .where('budget_name', isEqualTo: newBudgetName)
+            .where('is_active', isEqualTo: true)
+            .limit(1)
+            .get();
+
+        if (existingBudget.docs.isNotEmpty) {
+          debugPrint("Budget with name '$newBudgetName' already exists");
+          return false;
+        }
+      }
+
+      // Prepare update data
+      Map<String, dynamic> updateData = {
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+
+      if (newBudgetName != null) updateData['budget_name'] = newBudgetName;
+      if (budgetLimit != null) updateData['budget_limit'] = budgetLimit;
+      if (period != null) updateData['period'] = period;
+      if (description != null) updateData['description'] = description;
+      if (isAlert != null) updateData['is_alert'] = isAlert;
+      if (alertPercentage != null)
+        updateData['alert_percentage'] = alertPercentage;
+      if (alertMessage != null) updateData['alert_msg'] = alertMessage;
+
+      await budgetSnapshot.docs.first.reference.update(updateData);
+
+      debugPrint("Budget '$budgetName' updated successfully");
+      return true;
+    } catch (e) {
+      debugPrint("Error updating budget: $e");
+      return false;
+    }
+  }
+
+  /// Delete budget (soft delete)
+  Future<bool> deleteBudget(String budgetName) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) {
+        debugPrint("Email not found in shared preferences.");
+        return false;
+      }
+
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (budgetSnapshot.docs.isEmpty) {
+        debugPrint("Budget not found: $budgetName");
+        return false;
+      }
+
+      await budgetSnapshot.docs.first.reference.update({
+        'is_active': false,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      debugPrint("Budget '$budgetName' deleted successfully");
+      return true;
+    } catch (e) {
+      debugPrint("Error deleting budget: $e");
+      return false;
+    }
+  }
+
+  /// Check if a budget has exceeded its limit
+  Future<bool> isBudgetExceeded(String budgetName) async {
+    try {
+      var budgetInfo = await getBudgetByName(budgetName);
+      if (budgetInfo == null) {
+        return false;
+      }
+
+      double budgetLimit = budgetInfo['budget_limit']?.toDouble() ?? 0;
       double spend = budgetInfo['spend']?.toDouble() ?? 0;
 
-      return spend >= balance;
+      return spend >= budgetLimit;
     } catch (e) {
       debugPrint("Error checking if budget exceeded: $e");
       return false;
     }
   }
 
-  /// Get budget progress for a category (0.0 to 1.0)
-  Future<double> getBudgetProgress(String categoryName) async {
+  /// Get budget progress for a budget (0.0 to 1.0)
+  Future<double> getBudgetProgress(String budgetName) async {
     try {
-      var budgetInfo = await getCategoryBudget(categoryName);
-      if (budgetInfo == null || !budgetInfo['has_budget']) {
+      var budgetInfo = await getBudgetByName(budgetName);
+      if (budgetInfo == null) {
         return 0.0;
       }
 
-      double balance = budgetInfo['balance']?.toDouble() ?? 0;
+      double budgetLimit = budgetInfo['budget_limit']?.toDouble() ?? 0;
       double spend = budgetInfo['spend']?.toDouble() ?? 0;
 
-      if (balance <= 0) return 0.0;
+      if (budgetLimit <= 0) return 0.0;
 
-      double progress = spend / balance;
+      double progress = spend / budgetLimit;
       return progress > 1.0 ? 1.0 : progress;
     } catch (e) {
       debugPrint("Error getting budget progress: $e");
@@ -333,14 +436,164 @@ class BudgetController {
     }
   }
 
-  /// **NEW METHOD: Manual check for all budget alerts**
+  /// Reset budget spend to zero (useful for new periods)
+  Future<bool> resetBudgetSpend(String budgetName) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) {
+        debugPrint("Email not found in shared preferences.");
+        return false;
+      }
+
+      QuerySnapshot budgetSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('budget_name', isEqualTo: budgetName)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (budgetSnapshot.docs.isEmpty) {
+        debugPrint("Budget not found: $budgetName");
+        return false;
+      }
+
+      await budgetSnapshot.docs.first.reference.update({
+        'spend': 0.0,
+        'is_reached': false,
+        'current_month': DateTime.now().month,
+        'current_year': DateTime.now().year,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      debugPrint("Budget spend reset for '$budgetName'");
+      return true;
+    } catch (e) {
+      debugPrint("Error resetting budget spend: $e");
+      return false;
+    }
+  }
+
+  /// Get budgets by period
+  Future<List<Map<String, dynamic>>> getBudgetsByPeriod(String period) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? email = prefs.getString('email');
+
+      if (email == null) {
+        debugPrint("Email not found in shared preferences.");
+        return [];
+      }
+
+      QuerySnapshot budgetsSnapshot = await _firestore
+          .collection('budgets')
+          .where('email', isEqualTo: email)
+          .where('period', isEqualTo: period)
+          .where('is_active', isEqualTo: true)
+          .orderBy('budget_name')
+          .get();
+
+      List<Map<String, dynamic>> budgets = [];
+
+      for (var doc in budgetsSnapshot.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        budgets.add({
+          'id': doc.id,
+          'budget_id': data['budget_id'],
+          'budget_name': data['budget_name'],
+          'description': data['description'] ?? '',
+          'budget_limit': data['budget_limit'],
+          'spend': data['spend'] ?? 0,
+          'period': data['period'],
+          'current_month': data['current_month'],
+          'current_year': data['current_year'],
+          'is_alert': data['is_alert'] ?? false,
+          'alert_percentage': data['alert_percentage'],
+          'alert_msg': data['alert_msg'],
+          'is_reached': data['is_reached'] ?? false,
+          'created_at': data['created_at'],
+          'updated_at': data['updated_at'],
+        });
+      }
+
+      return budgets;
+    } catch (e) {
+      debugPrint("Error getting budgets by period: $e");
+      return [];
+    }
+  }
+
+  /// Manual check for all budget alerts
   Future<void> checkAllBudgetAlerts() async {
     try {
-      // Import and uncomment this line after adding the notification service
-      // await BudgetNotificationService.checkAndNotifyBudgets();
-      debugPrint("Manual budget alert check completed");
+      List<Map<String, dynamic>> allBudgets = await getAllBudgets();
+
+      for (var budget in allBudgets) {
+        await _checkBudgetAlerts(
+            budget, budget['spend']?.toDouble() ?? 0.0, budget['budget_name']);
+      }
+
+      debugPrint(
+          "Manual budget alert check completed for ${allBudgets.length} budgets");
     } catch (e) {
       debugPrint("Error in manual budget alert check: $e");
     }
+  }
+
+  /// Get budget summary statistics
+  Future<Map<String, dynamic>> getBudgetSummary() async {
+    try {
+      List<Map<String, dynamic>> allBudgets = await getAllBudgets();
+
+      int totalBudgets = allBudgets.length;
+      int exceededBudgets = 0;
+      int warningBudgets = 0;
+      double totalBudgetLimit = 0;
+      double totalSpent = 0;
+
+      for (var budget in allBudgets) {
+        double budgetLimit = budget['budget_limit']?.toDouble() ?? 0;
+        double spend = budget['spend']?.toDouble() ?? 0;
+        double alertPercentage = budget['alert_percentage']?.toDouble() ?? 80;
+
+        totalBudgetLimit += budgetLimit;
+        totalSpent += spend;
+
+        if (spend >= budgetLimit) {
+          exceededBudgets++;
+        } else if ((spend / budgetLimit) * 100 >= alertPercentage) {
+          warningBudgets++;
+        }
+      }
+
+      return {
+        'total_budgets': totalBudgets,
+        'exceeded_budgets': exceededBudgets,
+        'warning_budgets': warningBudgets,
+        'total_budget_limit': totalBudgetLimit,
+        'total_spent': totalSpent,
+        'remaining_budget': totalBudgetLimit - totalSpent,
+        'overall_progress':
+            totalBudgetLimit > 0 ? (totalSpent / totalBudgetLimit) : 0.0,
+      };
+    } catch (e) {
+      debugPrint("Error getting budget summary: $e");
+      return {
+        'total_budgets': 0,
+        'exceeded_budgets': 0,
+        'warning_budgets': 0,
+        'total_budget_limit': 0.0,
+        'total_spent': 0.0,
+        'remaining_budget': 0.0,
+        'overall_progress': 0.0,
+      };
+    }
+  }
+
+  /// Get available budget periods
+  List<String> getBudgetPeriods() {
+    return ['monthly', 'weekly', 'yearly', 'custom'];
   }
 }
