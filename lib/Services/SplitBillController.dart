@@ -166,8 +166,9 @@ class SplitBillService {
         'amount': userShare,
         'description': "Split bill: $description",
         'is_split_bill': true,
+        'sales_tax_amount': 0.0, // Add this field
         'created_at': FieldValue.serverTimestamp(),
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
+        'timestamp': FieldValue.serverTimestamp(), // Fixed timestamp format
       });
 
       return {
