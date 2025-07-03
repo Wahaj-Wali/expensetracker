@@ -110,11 +110,23 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       final result = await _salesTaxController.calculateYearlySalesTax();
 
       if (result['success'] == true) {
+        // Safely parse categoryWiseTax to Map<String, double>
+        Map<String, double> parsedCategoryWiseTax = {};
+        if (result['categoryWiseTax'] != null &&
+            result['categoryWiseTax'] is Map) {
+          (result['categoryWiseTax'] as Map).forEach((key, value) {
+            if (key != null && value != null) {
+              parsedCategoryWiseTax[key.toString()] = (value is num)
+                  ? value.toDouble()
+                  : double.tryParse(value.toString()) ?? 0.0;
+            }
+          });
+        }
         setState(() {
           _yearlySalesTax = result['totalSalesTax'];
           _expenseTransactionCount = result['transactionCount'];
           _averageTaxRate = result['averageTaxRate'];
-          _categoryWiseTax = result['categoryWiseTax'];
+          _categoryWiseTax = parsedCategoryWiseTax;
           _showSalesTaxResults = true;
         });
       }
@@ -371,6 +383,24 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                           'Average Tax Rate:',
                           '${_averageTaxRate.toStringAsFixed(2)}%',
                         ),
+                        // Category-wise breakdown (optional, only if data exists)
+                        if (_categoryWiseTax.isNotEmpty) ...[
+                          const Divider(height: 24),
+                          const Text(
+                            'Category-wise Sales Tax:',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ..._categoryWiseTax.entries
+                              .map((entry) => _buildSalesTaxRow(
+                                    entry.key,
+                                    'PKR ${entry.value.toStringAsFixed(2)}',
+                                  )),
+                        ],
                       ],
                     ],
                   ),
