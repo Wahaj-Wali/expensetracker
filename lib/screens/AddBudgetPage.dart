@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:ExpenseTracker/Services/BudgetModificationController.dart';
+import 'package:flutter/services.dart';
 
 class AddBudgetPage extends StatefulWidget {
   const AddBudgetPage({Key? key}) : super(key: key);
@@ -17,8 +18,6 @@ class _AddBudgetPageState extends State<AddBudgetPage>
 
   final BudgetController _budgetController = BudgetController();
 
-  late AnimationController _controller;
-  double bottomContainerHeight = 400;
   String selectedPeriod = 'monthly';
   bool alert = true;
   double _currentSliderValue = 80;
@@ -26,32 +25,11 @@ class _AddBudgetPageState extends State<AddBudgetPage>
   bool isLoading = false;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-  }
-
-  @override
   void dispose() {
-    _controller.dispose();
     amountController.dispose();
     nameController.dispose();
     descriptionController.dispose();
     super.dispose();
-  }
-
-  void onVerticalDragUpdate(DragUpdateDetails details) {
-    setState(() {
-      bottomContainerHeight -= details.primaryDelta!;
-      bottomContainerHeight = bottomContainerHeight.clamp(300.0, 600.0);
-    });
-  }
-
-  void onVerticalDragEnd(DragEndDetails details) {
-    // Optional: Add snap behavior here
   }
 
   Future<void> saveBudget() async {
@@ -165,407 +143,459 @@ class _AddBudgetPageState extends State<AddBudgetPage>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        backgroundColor: const Color.fromRGBO(127, 61, 255, 1),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            Navigator.pop(context);
-          },
-        ),
-        title: const Text(
-          "Create Budget",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
+  // Helper for section card styling (adapted for purple)
+  Widget _buildSectionCard(String title, IconData icon, List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            spreadRadius: 0,
+            blurRadius: 20,
+            offset: const Offset(0, 4),
           ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color:
+                        const Color.fromRGBO(127, 61, 255, 0.1), // purple tint
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: const Color.fromRGBO(127, 61, 255, 1), // purple
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            ...children,
+          ],
         ),
       ),
-      body: SingleChildScrollView(
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height -
-              AppBar().preferredSize.height -
-              MediaQuery.of(context).padding.top,
-          child: Stack(
+    );
+  }
+
+  // Helper for styled dropdown
+  Widget _buildStyledDropdown<T>({
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required Function(T?) onChanged,
+    required String hint,
+    String? Function(T?)? validator,
+  }) {
+    return DropdownButtonFormField<T>(
+      value: value,
+      items: items,
+      onChanged: onChanged,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: hint,
+        labelStyle: const TextStyle(
+          color: Colors.grey,
+          fontSize: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+              color: Color.fromRGBO(127, 61, 255, 1), width: 2), // purple
+        ),
+        filled: true,
+        fillColor: Colors.grey.withOpacity(0.05),
+      ),
+    );
+  }
+
+  // Helper for styled text field
+  Widget _buildStyledTextField({
+    required TextEditingController controller,
+    required String label,
+    String? prefixText,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+    Function(String)? onChanged,
+    int maxLines = 1,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      validator: validator,
+      onChanged: onChanged,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixText: prefixText,
+        labelStyle: const TextStyle(
+          color: Colors.grey,
+          fontSize: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+              color: Color.fromRGBO(127, 61, 255, 1), width: 2), // purple
+        ),
+        filled: true,
+        fillColor: Colors.grey.withOpacity(0.05),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: const Color.fromRGBO(127, 61, 255, 1), // purple
+        body: SafeArea(
+          child: Column(
             children: [
+              // Header
               Container(
-                color: const Color.fromRGBO(127, 61, 255, 1),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      const Color.fromRGBO(127, 61, 255, 1), // purple
+                      const Color.fromRGBO(127, 61, 255, 0.8), // purple tint
+                    ],
+                  ),
+                ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 20),
-                    const Text(
-                      'How much do you want to spend?',
-                      style: TextStyle(
-                        color: Color.fromRGBO(255, 255, 255, 0.64),
-                        fontSize: 18,
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(context).viewInsets.bottom * 0.5,
-                      ),
-                      child: TextField(
-                        controller: amountController,
-                        cursorColor: Colors.white,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 50,
-                        ),
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 8.0),
-                              child: Text(
-                                'PKR',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                              size: 24,
                             ),
                           ),
-                          hintText: '0',
-                          hintStyle: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 50,
+                        ),
+                        const Expanded(
+                          child: Text(
+                            'Create Budget',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
+                        const SizedBox(width: 40),
+                      ],
+                    ),
+                    const SizedBox(height: 25),
+                    // Amount Card
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'How much do you want to spend?',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: amountController,
+                                  cursorColor: Colors.white,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: true),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d*\.?\d{0,2}')),
+                                  ],
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    prefixIcon: Container(
+                                      margin: const EdgeInsets.only(right: 8),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 8.0),
+                                        child: Text(
+                                          'PKR',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    hintText: '0',
+                                    hintStyle: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 32,
+                                    ),
+                                    labelStyle:
+                                        const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
-              Positioned(
-                bottom: 0,
-                child: GestureDetector(
-                  onVerticalDragUpdate: onVerticalDragUpdate,
-                  onVerticalDragEnd: onVerticalDragEnd,
-                  child: AnimatedBuilder(
-                    animation: _controller,
-                    builder: (context, child) {
-                      return Container(
-                        width: MediaQuery.of(context).size.width,
-                        height: bottomContainerHeight,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.only(
-                            topLeft: Radius.circular(32),
-                            topRight: Radius.circular(32),
+              // Content Area
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(25),
+                      topRight: Radius.circular(25),
+                    ),
+                  ),
+                  child: ListView(
+                    padding: const EdgeInsets.all(20),
+                    children: [
+                      // Budget Name Section
+                      _buildSectionCard(
+                        'Budget Name',
+                        Icons.label,
+                        [
+                          _buildStyledTextField(
+                            controller: nameController,
+                            label: 'Budget Name (Required)',
                           ),
-                        ),
-                        child: SingleChildScrollView(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: Column(
-                              children: [
-                                const SizedBox(height: 16),
-                                // Budget Name (Required)
-                                TextField(
-                                  controller: nameController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Budget Name (Required)',
-                                    hintText: 'e.g. Groceries, Rent, Utilities',
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 12),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                          Radius.circular(16.0)),
-                                      borderSide: BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                          Radius.circular(16.0)),
-                                      borderSide: BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                          Radius.circular(16.0)),
-                                      borderSide: BorderSide(
-                                          color:
-                                              Color.fromRGBO(127, 61, 255, 1),
-                                          width: 1),
-                                    ),
-                                    filled: true,
-                                    fillColor: Color(0xFFF1F1FA),
-                                  ),
-                                  maxLines: 1,
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      // Description Section
+                      _buildSectionCard(
+                        'Description',
+                        Icons.description,
+                        [
+                          _buildStyledTextField(
+                            controller: descriptionController,
+                            label: 'Description (Optional)',
+                            maxLines: 2,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      // Period Section
+                      _buildSectionCard(
+                        'Budget Period',
+                        Icons.calendar_today,
+                        [
+                          _buildStyledDropdown<String>(
+                            value: selectedPeriod,
+                            items: _budgetController
+                                .getBudgetPeriods()
+                                .map((String period) {
+                              return DropdownMenuItem<String>(
+                                value: period,
+                                child: Text(period.toUpperCase()),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                selectedPeriod = value ?? 'monthly';
+                              });
+                            },
+                            hint: 'Select Period',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      // Alert Section
+                      _buildSectionCard(
+                        'Alert Settings',
+                        Icons.notifications_active,
+                        [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Receive Alert',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                                const SizedBox(height: 16),
-                                // Optional Description Field
-                                TextField(
-                                  controller: descriptionController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Description (Optional)',
-                                    hintText:
-                                        'Add a description for this budget...',
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 12),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                          Radius.circular(16.0)),
-                                      borderSide: BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                          Radius.circular(16.0)),
-                                      borderSide: BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                          Radius.circular(16.0)),
-                                      borderSide: BorderSide(
-                                          color:
-                                              Color.fromRGBO(127, 61, 255, 1),
-                                          width: 1),
-                                    ),
-                                    filled: true,
-                                    fillColor: Color(0xFFF1F1FA),
-                                  ),
-                                  maxLines: 2,
-                                ),
-                                const SizedBox(height: 16),
-                                // Budget Period Selection
-                                DropdownButtonFormField2<String>(
-                                  decoration: InputDecoration(
-                                    labelText: 'Budget Period',
-                                    isDense: true,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 8),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                          color: Color(0xFFF1F1FA), width: 1),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                          color:
-                                              Color.fromRGBO(127, 61, 255, 1),
-                                          width: 1),
-                                    ),
-                                  ),
-                                  buttonStyleData: ButtonStyleData(
-                                    height: 60,
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(16),
-                                      color: const Color(0xFFF1F1FA),
-                                    ),
-                                  ),
-                                  iconStyleData: const IconStyleData(
-                                    icon: Icon(
-                                        Icons.keyboard_arrow_down_rounded,
-                                        color: Colors.black54),
-                                    iconSize: 24,
-                                  ),
-                                  dropdownStyleData: DropdownStyleData(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(16),
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  items: _budgetController
-                                      .getBudgetPeriods()
-                                      .map((String period) {
-                                    return DropdownMenuItem<String>(
-                                      value: period,
-                                      child: Text(
-                                        period.toUpperCase(),
-                                        style: const TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.black87),
-                                      ),
-                                    );
-                                  }).toList(),
-                                  value: selectedPeriod,
-                                  onChanged: (String? value) {
-                                    setState(() {
-                                      selectedPeriod = value ?? 'monthly';
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 20),
-                                // Alert Settings Section
-                                Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF1F1FA),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          const Text(
-                                            'Receive Alert',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                          Switch(
-                                            value: alert,
-                                            onChanged: (value) {
-                                              setState(() {
-                                                alert = value;
-                                              });
-                                            },
-                                            activeColor: const Color.fromRGBO(
-                                                127, 61, 255, 1),
-                                          ),
-                                        ],
-                                      ),
-                                      if (alert) ...[
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'Alert at ${_currentSliderValue.round()}% of budget',
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            color: Colors.black54,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        SliderTheme(
-                                          data:
-                                              SliderTheme.of(context).copyWith(
-                                            activeTrackColor:
-                                                const Color.fromRGBO(
-                                                    127, 61, 255, 1),
-                                            inactiveTrackColor:
-                                                Colors.grey[300],
-                                            thumbColor: const Color.fromRGBO(
-                                                127, 61, 255, 1),
-                                            overlayColor: const Color.fromRGBO(
-                                                127, 61, 255, 0.2),
-                                          ),
-                                          child: Slider(
-                                            value: _currentSliderValue,
-                                            min: 50,
-                                            max: 100,
-                                            divisions: 10,
-                                            onChanged: (value) {
-                                              setState(() {
-                                                _currentSliderValue = value;
-                                              });
-                                            },
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        TextField(
-                                          onChanged: (value) {
-                                            setState(() {
-                                              customAlertMessage = value;
-                                            });
-                                          },
-                                          decoration: InputDecoration(
-                                            labelText: 'Custom Alert Message',
-                                            hintText:
-                                                "You've exceeded your budget limit!",
-                                            isDense: true,
-                                            contentPadding:
-                                                const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8),
-                                            border: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12.0),
-                                              borderSide: const BorderSide(
-                                                  color: Colors.grey, width: 1),
-                                            ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12.0),
-                                              borderSide: const BorderSide(
-                                                  color: Colors.grey, width: 1),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12.0),
-                                              borderSide: const BorderSide(
-                                                  color: Color.fromRGBO(
-                                                      127, 61, 255, 1),
-                                                  width: 1),
-                                            ),
-                                            filled: true,
-                                            fillColor: Colors.white,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                SizedBox(
-                                  height: 56,
-                                  child: ElevatedButton(
-                                    onPressed: isLoading ? null : saveBudget,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor:
-                                          const Color.fromRGBO(127, 61, 255, 1),
-                                      minimumSize:
-                                          const Size(double.infinity, 48),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    child: isLoading
-                                        ? const SizedBox(
-                                            height: 20,
-                                            width: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
-                                            ),
-                                          )
-                                        : const Text(
-                                            'Create Budget',
-                                            style: TextStyle(
-                                                fontSize: 18,
-                                                color: Colors.white),
-                                          ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                              ],
+                              ),
+                              Switch(
+                                value: alert,
+                                onChanged: (value) {
+                                  setState(() {
+                                    alert = value;
+                                  });
+                                },
+                                activeColor:
+                                    const Color.fromRGBO(127, 61, 255, 1),
+                              ),
+                            ],
+                          ),
+                          if (alert) ...[
+                            const SizedBox(height: 16),
+                            Text(
+                              'Alert at ${_currentSliderValue.round()}% of budget',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black54,
+                              ),
                             ),
-                          ),
-                        ),
-                      );
-                    },
+                            const SizedBox(height: 8),
+                            SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                activeTrackColor:
+                                    const Color.fromRGBO(127, 61, 255, 1),
+                                inactiveTrackColor: Colors.grey[300],
+                                thumbColor:
+                                    const Color.fromRGBO(127, 61, 255, 1),
+                                overlayColor:
+                                    const Color.fromRGBO(127, 61, 255, 0.2),
+                              ),
+                              child: Slider(
+                                value: _currentSliderValue,
+                                min: 50,
+                                max: 100,
+                                divisions: 10,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _currentSliderValue = value;
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _buildStyledTextField(
+                              controller: TextEditingController(
+                                  text: customAlertMessage),
+                              label: 'Custom Alert Message',
+                              onChanged: (value) {
+                                setState(() {
+                                  customAlertMessage = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 100), // Space for FAB
+                    ],
                   ),
                 ),
               ),
             ],
           ),
         ),
+        floatingActionButton: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              colors: [
+                const Color.fromRGBO(127, 61, 255, 1), // purple
+                const Color.fromRGBO(127, 61, 255, 0.8), // purple tint
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color.fromRGBO(127, 61, 255, 0.4), // purple shadow
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: FloatingActionButton.extended(
+            onPressed: isLoading ? null : saveBudget,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            icon: isLoading
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.check, color: Colors.white, size: 24),
+            label: const Text(
+              'Create Budget',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       ),
     );
   }
