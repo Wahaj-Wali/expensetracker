@@ -39,10 +39,35 @@ class LineChartWidget extends StatelessWidget {
     // Sum up expenses per month for the current year
     for (var doc in querySnapshot.docs) {
       var data = doc.data() as Map<String, dynamic>;
-      Timestamp timestamp = data['timestamp'];
-      double amount =
-          (data['amount'] ?? 0).toDouble(); // Handle nullable 'amount'
+      // Safely parse timestamp
+      Timestamp? timestamp;
+      if (data['timestamp'] is Timestamp) {
+        timestamp = data['timestamp'];
+      } else if (data['timestamp'] is String) {
+        try {
+          DateTime dt = DateTime.tryParse(data['timestamp']) ?? DateTime.now();
+          timestamp = Timestamp.fromDate(dt);
+        } catch (_) {
+          continue;
+        }
+      } else {
+        continue;
+      }
 
+      // Safely parse amount
+      double amount = 0.0;
+      var amt = data['amount'];
+      if (amt is double) {
+        amount = amt;
+      } else if (amt is int) {
+        amount = amt.toDouble();
+      } else if (amt is String) {
+        amount = double.tryParse(amt) ?? 0.0;
+      }
+
+      if (timestamp == null) {
+        continue;
+      }
       DateTime date = timestamp.toDate();
 
       // Check if the transaction is from the current year
