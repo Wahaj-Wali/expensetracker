@@ -229,6 +229,150 @@ class BudgetService {
     }
   }
 
+  /// Get transactions related to a specific budget
+  static Future<List<Map<String, dynamic>>> getBudgetTransactions(
+      String budgetId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        return [];
+      }
+
+      // Get budget details first
+      final budget = await getBudgetById(budgetId);
+      if (budget == null) {
+        return [];
+      }
+
+      final startDate = DateTime.parse(budget['start_date']);
+      final endDate = DateTime.parse(budget['end_date']);
+      final categoryId = budget['category_id'];
+
+      Query query = _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email)
+          .where('transaction_type', isEqualTo: 'Expense')
+          .where('timestamp',
+              isGreaterThanOrEqualTo: startDate.toUtc().toIso8601String())
+          .where('timestamp',
+              isLessThanOrEqualTo: endDate.toUtc().toIso8601String());
+
+      // If budget is category-specific, filter by category
+      if (categoryId != null) {
+        query = query.where('category_id', isEqualTo: categoryId);
+      }
+
+      final snapshot = await query.orderBy('timestamp', descending: true).get();
+
+      return snapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+    } catch (e) {
+      log('Error getting budget transactions: $e');
+      return [];
+    }
+  }
+
+  /// Get transactions that contributed to budget spending
+  static Future<List<Map<String, dynamic>>> getBudgetRelatedTransactions(
+      Map<String, dynamic> budget) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email');
+      if (email == null) {
+        return [];
+      }
+
+      final startDate = DateTime.parse(budget['start_date']);
+      final endDate = DateTime.parse(budget['end_date']);
+      final categoryId = budget['category_id'];
+
+      // Base query for expense transactions within budget period
+      Query query = _firestore
+          .collection('transactions')
+          .where('email', isEqualTo: email)
+          .where('transaction_type', isEqualTo: 'Expense')
+          .where('timestamp',
+              isGreaterThanOrEqualTo: startDate.toUtc().toIso8601String())
+          .where('timestamp',
+              isLessThanOrEqualTo: endDate.toUtc().toIso8601String());
+
+      QuerySnapshot snapshot;
+
+      if (categoryId != null) {
+        // For category-specific budgets, get transactions from that category
+        snapshot = await query
+            .where('category_id', isEqualTo: categoryId)
+            .orderBy('timestamp', descending: true)
+            .get();
+      } else {
+        // For general budgets, get all expense transactions in the period
+        snapshot = await query.orderBy('timestamp', descending: true).get();
+      }
+
+      List<Map<String, dynamic>> transactions = snapshot.docs
+          .map((doc) => doc.data() as Map<String, dynamic>)
+          .toList();
+
+      // Add additional info for display
+      for (var transaction in transactions) {
+        transaction['contributes_to_budget'] = true;
+        transaction['budget_name'] = budget['name'];
+      }
+
+      return transactions;
+    } catch (e) {
+      log('Error getting budget related transactions: $e');
+      return [];
+    }
+  }
+
+  /// Calculate budget spending from transactions
+  static Future<double> calculateBudgetSpendingFromTransactions(
+      String budgetId) async {
+    try {
+      final transactions = await getBudgetTransactions(budgetId);
+      double totalSpent = 0.0;
+
+      for (var transaction in transactions) {
+        final amount = _parseAmount(transaction['amount']);
+        totalSpent += amount;
+      }
+
+      return totalSpent;
+    } catch (e) {
+      log('Error calculating budget spending: $e');
+      return 0.0;
+    }
+  }
+
+  /// Helper method to parse amount from various formats
+  static double _parseAmount(dynamic amount) {
+    if (amount is double) return amount;
+    if (amount is int) return amount.toDouble();
+    if (amount is String) return double.tryParse(amount) ?? 0.0;
+    return 0.0;
+  }
+
+  /// Sync budget spending with actual transactions
+  static Future<bool> syncBudgetSpending(String budgetId) async {
+    try {
+      final actualSpending =
+          await calculateBudgetSpendingFromTransactions(budgetId);
+
+      await _firestore.collection('budgets').doc(budgetId).update({
+        'spent_amount': actualSpending,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+
+      return true;
+    } catch (e) {
+      log('Error syncing budget spending: $e');
+      return false;
+    }
+  }
+
   /// Update budget spent amount when expense is added
   static Future<bool> updateBudgetSpending({
     required String budgetId,
