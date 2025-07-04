@@ -1,7 +1,7 @@
 import 'package:ExpenseTracker/Services/BudgetService.dart';
 import 'package:ExpenseTracker/Services/CategoriesService.dart';
+import 'package:ExpenseTracker/screens/BudgetTransactionPage.dart';
 import 'package:flutter/material.dart';
-// Update with your actual path
 
 class BudgetManagementPage extends StatefulWidget {
   const BudgetManagementPage({super.key});
@@ -120,197 +120,234 @@ class _BudgetManagementPageState extends State<BudgetManagementPage> {
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        budget['name'] ?? 'Unknown Budget',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        if (!isActive)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              'Inactive',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
+          child: InkWell(
+            onTap: () => _navigateToBudgetTransactions(budget),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                budget['name'] ?? 'Unknown Budget',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
-                          ),
-                        const SizedBox(width: 8),
-                        PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _showEditBudgetDialog(budget);
-                            } else if (value == 'delete') {
-                              _deleteBudget(budget['budget_id']);
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'edit',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.edit, size: 16),
-                                  SizedBox(width: 8),
-                                  Text('Edit'),
-                                ],
-                              ),
-                            ),
-                            const PopupMenuItem(
-                              value: 'delete',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.delete,
-                                      size: 16, color: Colors.red),
-                                  SizedBox(width: 8),
-                                  Text('Delete',
-                                      style: TextStyle(color: Colors.red)),
-                                ],
-                              ),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                              color: Colors.grey.shade400,
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Text(
-                      'Period: ${budget['period'].toString().toUpperCase()}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey.shade600,
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    if (budget['category_id'] != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade100,
-                          borderRadius: BorderRadius.circular(10),
+                      Row(
+                        children: [
+                          if (!isActive)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Inactive',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(width: 8),
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _showEditBudgetDialog(budget);
+                              } else if (value == 'delete') {
+                                _deleteBudget(budget['budget_id']);
+                              } else if (value == 'view_transactions') {
+                                _navigateToBudgetTransactions(budget);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'view_transactions',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.receipt_long, size: 16),
+                                    SizedBox(width: 8),
+                                    Text('View Transactions'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 16),
+                                    SizedBox(width: 8),
+                                    Text('Edit'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete,
+                                        size: 16, color: Colors.red),
+                                    SizedBox(width: 8),
+                                    Text('Delete',
+                                        style: TextStyle(color: Colors.red)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        'Period: ${budget['period'].toString().toUpperCase()}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
                         ),
-                        child: Text(
-                          _getCategoryName(budget['category_id']),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue.shade700,
+                      ),
+                      const SizedBox(width: 16),
+                      if (budget['category_id'] != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            _getCategoryName(budget['category_id']),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blue.shade700,
+                            ),
                           ),
                         ),
+                    ],
+                  ),
+                  if (budget['description'] != null &&
+                      budget['description'].isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        budget['description'],
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
-                  ],
-                ),
-                if (budget['description'] != null &&
-                    budget['description'].isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      budget['description'],
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey.shade600,
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Budget: ₹${budget['amount'].toString()}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
+                      Text(
+                        'Spent: ₹${budget['spent_amount'].toString()}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: isExceeded ? Colors.red : Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: progress > 100 ? 1.0 : progress / 100,
+                    backgroundColor: Colors.grey.shade300,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isExceeded ? Colors.red : Colors.green,
                     ),
                   ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Budget: ₹${budget['amount'].toString()}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Remaining: ₹${remaining.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isExceeded ? Colors.red : Colors.green,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                    Text(
-                      'Spent: ₹${budget['spent_amount'].toString()}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: isExceeded ? Colors.red : Colors.orange,
+                      Text(
+                        '${progress.toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isExceeded ? Colors.red : Colors.grey,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: progress > 100 ? 1.0 : progress / 100,
-                  backgroundColor: Colors.grey.shade300,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    isExceeded ? Colors.red : Colors.green,
+                    ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Remaining: ₹${remaining.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isExceeded ? Colors.red : Colors.green,
-                        fontWeight: FontWeight.w500,
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'From: ${_formatDate(budget['start_date'])}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
-                    ),
-                    Text(
-                      '${progress.toStringAsFixed(1)}%',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isExceeded ? Colors.red : Colors.grey,
+                      Text(
+                        'To: ${_formatDate(budget['end_date'])}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'From: ${_formatDate(budget['start_date'])}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    Text(
-                      'To: ${_formatDate(budget['end_date'])}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  void _navigateToBudgetTransactions(Map<String, dynamic> budget) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BudgetTransactionsScreen(budget: budget),
+      ),
     );
   }
 
