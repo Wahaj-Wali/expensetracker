@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:ExpenseTracker/Services/BudgetService2.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ class _AddExpensePageState extends State<AddExpensePage>
 
   List<Map<String, dynamic>> categories = [];
   Map<String, dynamic>? selectedCategory;
+
   final Map<String, IconData> _flutterIcons = {
     'Restaurant': Icons.restaurant,
     'Dining': Icons.local_dining,
@@ -64,6 +66,7 @@ class _AddExpensePageState extends State<AddExpensePage>
     'Furniture': Icons.weekend,
     // Add more icons as needed
   };
+
   IconData? getIconData(String iconName) {
     return _flutterIcons[iconName];
   }
@@ -79,7 +82,8 @@ class _AddExpensePageState extends State<AddExpensePage>
 
   final TextEditingController _editDescription = TextEditingController();
 
-  final BudgetController _BudgetController = BudgetController();
+  // Remove BudgetController instance
+  // final BudgetController _BudgetController = BudgetController();
 
   // Remove Currency widget usage and add currency converter state/logic
   String _fromCurrency = 'PKR';
@@ -237,7 +241,6 @@ class _AddExpensePageState extends State<AddExpensePage>
     await CustomLoader.showLoaderForTask(
         context: context,
         task: () async {
-          //Code
           try {
             // Check if amount is 0 or negative
             if (_originalAmount <= 0) {
@@ -288,7 +291,7 @@ class _AddExpensePageState extends State<AddExpensePage>
               TransactionController transactionController =
                   TransactionController();
               final result = await transactionController.processTransaction(
-                amount: _originalAmount, // Directly pass as double
+                amount: _originalAmount,
                 accountName: selectedWallet ?? 'Unknown Account',
                 transactionType: "Expense",
               );
@@ -308,6 +311,10 @@ class _AddExpensePageState extends State<AddExpensePage>
                   'timestamp': Timestamp.now(),
                   'transaction_id': tId,
                   'transaction_type': 'Expense',
+                  // Add budget tracking fields
+                  'budget_id': selectedBudget?['budget_id'],
+                  'budget_name': selectedBudget?['name'],
+                  'tracked_in_budget': selectedBudget != null,
                 };
 
                 // Save transaction data to Firestore
@@ -315,8 +322,14 @@ class _AddExpensePageState extends State<AddExpensePage>
                     .collection('transactions')
                     .add(transactionData);
 
-                _BudgetController.updateSpendAmount(
-                    _originalAmount, selectedCategory!['name']);
+                // Update budget spending if budget is selected
+                if (selectedBudget != null) {
+                  await BudgetService.updateBudgetSpending(
+                    budgetId: selectedBudget!['budget_id'],
+                    amount: _originalAmount,
+                    isAdd: true,
+                  );
+                }
 
                 // Display a success message
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -347,14 +360,39 @@ class _AddExpensePageState extends State<AddExpensePage>
         });
   }
 
+  List<Map<String, dynamic>> availableBudgets = [];
+  Map<String, dynamic>? selectedBudget;
+  bool _isBudgetLoading = false;
+
+// Add this method to fetch budgets
+  Future<void> fetchAvailableBudgets() async {
+    setState(() {
+      _isBudgetLoading = true;
+    });
+
+    try {
+      final budgets = await BudgetService.getActiveBudgets();
+      setState(() {
+        availableBudgets = budgets;
+        _isBudgetLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isBudgetLoading = false;
+      });
+      print('Error fetching budgets: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     fetchCategories();
     fetchAccounts();
+    fetchAvailableBudgets(); // Add this line
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 150), // Faster response time
+      duration: const Duration(milliseconds: 150),
     );
     _animation =
         Tween<double>(begin: bottomContainerHeight, end: bottomContainerHeight)
@@ -435,597 +473,760 @@ class _AddExpensePageState extends State<AddExpensePage>
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        backgroundColor: const Color.fromRGBO(253, 60, 74, 1),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            Navigator.pop(context);
-          },
-        ),
-        title: const Text(
-          "Expense",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
+  void _onCategoryChanged(Map<String, dynamic> category) {
+    setState(() {
+      selectedCategory = category;
+    });
+  }
+
+  Widget _buildSectionCard(String title, IconData icon, List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            spreadRadius: 0,
+            blurRadius: 20,
+            offset: const Offset(0, 4),
           ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(253, 60, 74, 0.1), // red tint
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: const Color.fromRGBO(253, 60, 74, 1), // red
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            ...children,
+          ],
         ),
       ),
-      body: Stack(
+    );
+  }
+
+  // Helper for styled dropdown
+  Widget _buildStyledDropdown<T>({
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required Function(T?) onChanged,
+    required String hint,
+    String? Function(T?)? validator,
+  }) {
+    return DropdownButtonFormField<T>(
+      value: value,
+      items: items,
+      onChanged: onChanged,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: hint,
+        labelStyle: const TextStyle(
+          color: Colors.grey,
+          fontSize: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+              color: Color.fromRGBO(253, 60, 74, 1), width: 2), // red
+        ),
+        filled: true,
+        fillColor: Colors.grey.withOpacity(0.05),
+      ),
+    );
+  }
+
+  // Helper for styled text field
+  Widget _buildStyledTextField({
+    required TextEditingController controller,
+    required String label,
+    String? prefixText,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+    Function(String)? onChanged,
+    int maxLines = 1,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      validator: validator,
+      onChanged: onChanged,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixText: prefixText,
+        labelStyle: const TextStyle(
+          color: Colors.grey,
+          fontSize: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+              color: Color.fromRGBO(253, 60, 74, 1), width: 2), // red
+        ),
+        filled: true,
+        fillColor: Colors.grey.withOpacity(0.05),
+      ),
+    );
+  }
+
+  // ---------- Budget Selection Widget -----------
+  Widget _buildBudgetSelection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            child: Container(
-              color: const Color.fromRGBO(253, 60, 74, 1),
-              height: MediaQuery.of(context).size.height,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+          const Text(
+            'Budget (Optional)',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: _isBudgetLoading
+                ? const Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 10),
+                      Text('Loading budgets...'),
+                    ],
+                  )
+                : DropdownButton<Map<String, dynamic>>(
+                    value: selectedBudget,
+                    hint: const Text('Select Budget (Optional)'),
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    items: [
+                      // Add "None" option
+                      const DropdownMenuItem<Map<String, dynamic>>(
+                        value: null,
+                        child: Text('None'),
+                      ),
+                      // Add budget options
+                      ...availableBudgets.map((budget) {
+                        double remaining =
+                            BudgetService.getRemainingAmount(budget);
+                        double progress =
+                            BudgetService.getBudgetProgress(budget);
+                        bool isExceeded =
+                            BudgetService.isBudgetExceeded(budget);
+
+                        return DropdownMenuItem<Map<String, dynamic>>(
+                          value: budget,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                budget['name'] ?? 'Unknown Budget',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  color: isExceeded ? Colors.red : Colors.black,
+                                ),
+                              ),
+                              Text(
+                                'Remaining: ${remaining.toStringAsFixed(2)} (${progress.toStringAsFixed(1)}%)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isExceeded ? Colors.red : Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        selectedBudget = value;
+                      });
+                    },
+                  ),
+          ),
+          if (selectedBudget != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(
-                    height: 50,
+                  Text(
+                    'Budget: ${selectedBudget!['name']}',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
                   ),
-                  const Text(
-                    'How Much?',
+                  const SizedBox(height: 4),
+                  Text(
+                    'Amount: ${selectedBudget!['amount'].toString()}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  Text(
+                    'Spent: ${selectedBudget!['spent_amount'].toString()}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  Text(
+                    'Remaining: ${BudgetService.getRemainingAmount(selectedBudget!).toStringAsFixed(2)}',
                     style: TextStyle(
-                      color: Color.fromRGBO(255, 255, 255, 0.64),
-                      fontSize: 18,
+                      fontSize: 12,
+                      color: BudgetService.isBudgetExceeded(selectedBudget!)
+                          ? Colors.red
+                          : Colors.green,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  // --- Currency Converter UI (like IncomeExpensePage) ---
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: TextFormField(
-                          cursorColor: Colors.white,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 40,
-                          ),
-                          controller: _amountController,
-                          keyboardType:
-                              TextInputType.numberWithOptions(decimal: true),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d*\.?\d{0,2}')),
-                          ],
-                          decoration: InputDecoration(
-                            border: InputBorder.none,
-                            prefixIcon: Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              child: Icon(
-                                Icons.arrow_downward,
-                                color: Colors.white,
-                                size: 40,
-                              ),
-                            ),
-                            hintText: '0',
-                            hintStyle: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 40,
-                            ),
-                            labelStyle: const TextStyle(color: Colors.white),
-                          ),
-                          onChanged: (value) {
-                            _convertCurrency();
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: DropdownButtonFormField2<String>(
-                          value: _fromCurrency,
-                          items: _currencies.map((currency) {
-                            return DropdownMenuItem<String>(
-                              value: currency['code'],
-                              child: Text(
-                                  '${currency['code']} - ${currency['name']}'),
-                            );
-                          }).toList(),
-                          onChanged: (String? newValue) {
-                            setState(() {
-                              _fromCurrency = newValue!;
-                              if (_amountController.text.isNotEmpty)
-                                _convertCurrency();
-                            });
-                          },
-                          decoration: InputDecoration(
-                            labelText: "From",
-                            labelStyle: TextStyle(color: Colors.white),
-                            contentPadding: EdgeInsets.symmetric(
-                                horizontal: 15, vertical: 10),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.all(Radius.circular(16)),
-                              borderSide: BorderSide(color: Colors.white),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.all(Radius.circular(16)),
-                              borderSide: BorderSide(color: Colors.white),
-                            ),
-                          ),
-                          iconStyleData: const IconStyleData(
-                            icon: Icon(Icons.keyboard_arrow_down_rounded),
-                            iconSize: 36,
-                            iconEnabledColor: Colors.white,
-                          ),
-                          selectedItemBuilder: (BuildContext context) {
-                            return _currencies.map<Widget>((currency) {
-                              return Text(
-                                currency['code']!,
-                                style: TextStyle(color: Colors.white),
-                              );
-                            }).toList();
-                          },
-                          dropdownStyleData: DropdownStyleData(
-                            width: double.infinity,
-                            isFullScreen: true,
-                          ),
-                          dropdownSearchData: DropdownSearchData(
-                            searchController: _fromCurrencySearchController,
-                            searchInnerWidget: Container(
-                              margin: EdgeInsets.all(16),
-                              child: TextField(
-                                controller: _fromCurrencySearchController,
-                                decoration: InputDecoration(
-                                  hintText: 'Search currencies...',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            searchInnerWidgetHeight: 60,
-                            searchMatchFn: (item, searchValue) {
-                              return (item.value as String)
-                                  .toLowerCase()
-                                  .contains(searchValue.toLowerCase());
-                            },
-                          ),
-                        ),
-                      ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  // -----------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: const Color.fromRGBO(253, 60, 74, 1), // red
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      const Color.fromRGBO(253, 60, 74, 1), // red
+                      const Color.fromRGBO(253, 60, 74, 0.8), // red tint
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: Container(
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.white),
-                            borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                              size: 24,
+                            ),
                           ),
-                          child: _isLoading
-                              ? Center(
-                                  child: CircularProgressIndicator(
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.white),
-                                  ),
-                                )
-                              : Text(
-                                  _convertedAmount.isEmpty
-                                      ? '0.00'
-                                      : _convertedAmount,
-                                  style: TextStyle(
+                        ),
+                        const Expanded(
+                          child: Text(
+                            'Add Expense',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 40),
+                      ],
+                    ),
+                    const SizedBox(height: 25),
+                    // Amount & Currency Converter Card
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'How Much?',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: TextFormField(
+                                  cursorColor: Colors.white,
+                                  style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
                                   ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: DropdownButtonFormField2<String>(
-                          value: _toCurrency,
-                          items: _currencies.map((currency) {
-                            return DropdownMenuItem<String>(
-                              value: currency['code'],
-                              child: Text(
-                                  '${currency['code']} - ${currency['name']}'),
-                            );
-                          }).toList(),
-                          onChanged: (String? newValue) {
-                            setState(() {
-                              _toCurrency = newValue!;
-                              if (_amountController.text.isNotEmpty)
-                                _convertCurrency();
-                            });
-                          },
-                          decoration: InputDecoration(
-                            labelText: "To",
-                            labelStyle: TextStyle(color: Colors.white),
-                            contentPadding: EdgeInsets.symmetric(
-                                horizontal: 15, vertical: 10),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.all(Radius.circular(16)),
-                              borderSide: BorderSide(color: Colors.white),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.all(Radius.circular(16)),
-                              borderSide: BorderSide(color: Colors.white),
-                            ),
-                          ),
-                          iconStyleData: const IconStyleData(
-                            icon: Icon(Icons.keyboard_arrow_down_rounded),
-                            iconSize: 36,
-                            iconEnabledColor: Colors.white,
-                          ),
-                          selectedItemBuilder: (BuildContext context) {
-                            return _currencies.map<Widget>((currency) {
-                              return Text(
-                                currency['code']!,
-                                style: TextStyle(color: Colors.white),
-                              );
-                            }).toList();
-                          },
-                          dropdownStyleData: DropdownStyleData(
-                            width: double.infinity,
-                            isFullScreen: true,
-                          ),
-                          dropdownSearchData: DropdownSearchData(
-                            searchController: _toCurrencySearchController,
-                            searchInnerWidget: Container(
-                              margin: EdgeInsets.all(16),
-                              child: TextField(
-                                controller: _toCurrencySearchController,
-                                decoration: InputDecoration(
-                                  hintText: 'Search currencies...',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            searchInnerWidgetHeight: 60,
-                            searchMatchFn: (item, searchValue) {
-                              return (item.value as String)
-                                  .toLowerCase()
-                                  .contains(searchValue.toLowerCase());
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_convertedAmount.isNotEmpty &&
-                      (_convertedAmount.contains('error') ||
-                          _convertedAmount.contains('Failed') ||
-                          _convertedAmount.contains('required') ||
-                          _convertedAmount.contains('Invalid') ||
-                          _convertedAmount.contains('greater')))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(
-                        _convertedAmount,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  // --- End Currency Converter UI ---
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 0,
-            child: GestureDetector(
-              onVerticalDragUpdate: onVerticalDragUpdate,
-              onVerticalDragEnd: onVerticalDragEnd,
-              child: AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Container(
-                      width: MediaQuery.of(context).size.width,
-                      height: bottomContainerHeight,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(32),
-                          topRight: Radius.circular(32),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 10,
-                            offset: Offset(0, -2),
-                          ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: SingleChildScrollView(
-                          physics: const NeverScrollableScrollPhysics(),
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 40,
-                                height: 5,
-                                margin: const EdgeInsets.only(top: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              DropdownButtonFormField2<Map<String, dynamic>>(
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFFF1F1FA), width: 1),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFFF1F1FA), width: 1),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color.fromRGBO(127, 61, 255, 1),
-                                        width: 1),
-                                  ),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF1F1FA),
-                                ),
-                                buttonStyleData: ButtonStyleData(
-                                  height: 60,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(16),
-                                    color: const Color(0xFFF1F1FA),
-                                  ),
-                                ),
-                                iconStyleData: const IconStyleData(
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: Colors.black54,
-                                  ),
-                                  iconSize: 24,
-                                ),
-                                dropdownStyleData: DropdownStyleData(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(16),
-                                    color: Colors.white,
-                                  ),
-                                  offset: const Offset(0, -10),
-                                  scrollbarTheme: ScrollbarThemeData(
-                                    radius: const Radius.circular(40),
-                                    thickness: WidgetStateProperty.all(6),
-                                    thumbVisibility:
-                                        WidgetStateProperty.all(true),
-                                  ),
-                                ),
-                                menuItemStyleData: const MenuItemStyleData(
-                                  height: 50,
-                                  padding: EdgeInsets.symmetric(horizontal: 16),
-                                ),
-                                items: categories
-                                    .map((Map<String, dynamic> category) {
-                                  return DropdownMenuItem<Map<String, dynamic>>(
-                                    value: category,
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 40,
-                                          height: 40,
-                                          decoration: BoxDecoration(
-                                            color: Color(int.parse(
-                                                    category['iconColor']
-                                                        .replaceFirst(
-                                                            '#', '0xFF')))
-                                                .withOpacity(0.1),
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                          child: Icon(
-                                            getIconData(category['iconName']),
-                                            color: Color(int.parse(
-                                                category['iconColor']
-                                                    .replaceFirst(
-                                                        '#', '0xFF'))),
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Text(
-                                          category['name'],
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
-                                value: selectedCategory,
-                                onChanged: (value) {
-                                  setState(() {
-                                    selectedCategory = value;
-                                  });
-                                },
-                                hint: const Row(
-                                  children: [
-                                    SizedBox(width: 0),
-                                    Text(
-                                      'Select Category',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.black54,
+                                  controller: _amountController,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: true),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d*\.?\d{0,2}')),
+                                  ],
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    prefixIcon: Container(
+                                      margin: const EdgeInsets.only(right: 8),
+                                      child: const Icon(
+                                        Icons.arrow_downward,
+                                        color: Colors.white,
+                                        size: 32,
                                       ),
                                     ),
-                                  ],
+                                    hintText: '0',
+                                    hintStyle: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 32,
+                                    ),
+                                    labelStyle:
+                                        const TextStyle(color: Colors.white),
+                                  ),
+                                  onChanged: (value) {
+                                    _convertCurrency();
+                                  },
                                 ),
                               ),
-                              const SizedBox(height: 12),
-                              DropdownButtonFormField2<String>(
-                                // Same styling as above, just change categories to wallets and hint text
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFFF1F1FA), width: 1),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 2,
+                                child: DropdownButtonFormField2<String>(
+                                  value: _fromCurrency,
+                                  items: _currencies.map((currency) {
+                                    return DropdownMenuItem<String>(
+                                      value: currency['code'],
+                                      child: Text(
+                                          '${currency['code']} - ${currency['name']}'),
+                                    );
+                                  }).toList(),
+                                  onChanged: (String? newValue) {
+                                    setState(() {
+                                      _fromCurrency = newValue!;
+                                      if (_amountController.text.isNotEmpty)
+                                        _convertCurrency();
+                                    });
+                                  },
+                                  decoration: const InputDecoration(
+                                    labelText: "From",
+                                    labelStyle: TextStyle(color: Colors.white),
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 15, vertical: 10),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.all(Radius.circular(16)),
+                                      borderSide:
+                                          BorderSide(color: Colors.white),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.all(Radius.circular(16)),
+                                      borderSide:
+                                          BorderSide(color: Colors.white),
+                                    ),
                                   ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFFF1F1FA), width: 1),
+                                  iconStyleData: const IconStyleData(
+                                    icon:
+                                        Icon(Icons.keyboard_arrow_down_rounded),
+                                    iconSize: 36,
+                                    iconEnabledColor: Colors.white,
                                   ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color.fromRGBO(127, 61, 255, 1),
-                                        width: 1),
+                                  selectedItemBuilder: (BuildContext context) {
+                                    return _currencies.map<Widget>((currency) {
+                                      return Text(
+                                        currency['code']!,
+                                        style: const TextStyle(
+                                            color: Colors.white),
+                                      );
+                                    }).toList();
+                                  },
+                                  dropdownStyleData: const DropdownStyleData(
+                                    width: double.infinity,
+                                    isFullScreen: true,
                                   ),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF1F1FA),
+                                  dropdownSearchData: DropdownSearchData(
+                                    searchController:
+                                        _fromCurrencySearchController,
+                                    searchInnerWidget: Container(
+                                      margin: const EdgeInsets.all(16),
+                                      child: TextField(
+                                        controller:
+                                            _fromCurrencySearchController,
+                                        decoration: InputDecoration(
+                                          hintText: 'Search currencies...',
+                                          border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    searchInnerWidgetHeight: 60,
+                                    searchMatchFn: (item, searchValue) {
+                                      return (item.value as String)
+                                          .toLowerCase()
+                                          .contains(searchValue.toLowerCase());
+                                    },
+                                  ),
                                 ),
-                                buttonStyleData: ButtonStyleData(
-                                  height: 60,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Container(
+                                  padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(16),
-                                    color: const Color(0xFFF1F1FA),
+                                    border: Border.all(color: Colors.white),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: _isLoading
+                                      ? const Center(
+                                          child: CircularProgressIndicator(
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                    Colors.white),
+                                          ),
+                                        )
+                                      : Text(
+                                          _convertedAmount.isEmpty
+                                              ? '0.00'
+                                              : _convertedAmount,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 2,
+                                child: DropdownButtonFormField2<String>(
+                                  value: _toCurrency,
+                                  items: _currencies.map((currency) {
+                                    return DropdownMenuItem<String>(
+                                      value: currency['code'],
+                                      child: Text(
+                                          '${currency['code']} - ${currency['name']}'),
+                                    );
+                                  }).toList(),
+                                  onChanged: (String? newValue) {
+                                    setState(() {
+                                      _toCurrency = newValue!;
+                                      if (_amountController.text.isNotEmpty)
+                                        _convertCurrency();
+                                    });
+                                  },
+                                  decoration: const InputDecoration(
+                                    labelText: "To",
+                                    labelStyle: TextStyle(color: Colors.white),
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 15, vertical: 10),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.all(Radius.circular(16)),
+                                      borderSide:
+                                          BorderSide(color: Colors.white),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.all(Radius.circular(16)),
+                                      borderSide:
+                                          BorderSide(color: Colors.white),
+                                    ),
+                                  ),
+                                  iconStyleData: const IconStyleData(
+                                    icon:
+                                        Icon(Icons.keyboard_arrow_down_rounded),
+                                    iconSize: 36,
+                                    iconEnabledColor: Colors.white,
+                                  ),
+                                  selectedItemBuilder: (BuildContext context) {
+                                    return _currencies.map<Widget>((currency) {
+                                      return Text(
+                                        currency['code']!,
+                                        style: const TextStyle(
+                                            color: Colors.white),
+                                      );
+                                    }).toList();
+                                  },
+                                  dropdownStyleData: const DropdownStyleData(
+                                    width: double.infinity,
+                                    isFullScreen: true,
+                                  ),
+                                  dropdownSearchData: DropdownSearchData(
+                                    searchController:
+                                        _toCurrencySearchController,
+                                    searchInnerWidget: Container(
+                                      margin: const EdgeInsets.all(16),
+                                      child: TextField(
+                                        controller: _toCurrencySearchController,
+                                        decoration: InputDecoration(
+                                          hintText: 'Search currencies...',
+                                          border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    searchInnerWidgetHeight: 60,
+                                    searchMatchFn: (item, searchValue) {
+                                      return (item.value as String)
+                                          .toLowerCase()
+                                          .contains(searchValue.toLowerCase());
+                                    },
                                   ),
                                 ),
-                                iconStyleData: const IconStyleData(
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: Colors.black54,
-                                  ),
-                                  iconSize: 24,
+                              ),
+                            ],
+                          ),
+                          if (_convertedAmount.isNotEmpty &&
+                              (_convertedAmount.contains('error') ||
+                                  _convertedAmount.contains('Failed') ||
+                                  _convertedAmount.contains('required') ||
+                                  _convertedAmount.contains('Invalid') ||
+                                  _convertedAmount.contains('greater')))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8.0),
+                              child: Text(
+                                _convertedAmount,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 14,
                                 ),
-                                dropdownStyleData: DropdownStyleData(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(16),
-                                    color: Colors.white,
-                                  ),
-                                  offset: const Offset(0, -10),
-                                  scrollbarTheme: ScrollbarThemeData(
-                                    radius: const Radius.circular(40),
-                                    thickness: WidgetStateProperty.all(6),
-                                    thumbVisibility:
-                                        WidgetStateProperty.all(true),
-                                  ),
-                                ),
-                                menuItemStyleData: const MenuItemStyleData(
-                                  height: 50,
-                                  padding: EdgeInsets.symmetric(horizontal: 16),
-                                ),
-                                items: wallets.map((String item) {
-                                  return DropdownMenuItem<String>(
-                                    value: item,
-                                    child: Text(
-                                      item,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Content Area
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(25),
+                      topRight: Radius.circular(25),
+                    ),
+                  ),
+                  child: ListView(
+                    padding: const EdgeInsets.all(20),
+                    children: [
+                      // Category Section
+                      _buildSectionCard(
+                        'Category',
+                        Icons.category,
+                        [
+                          _buildStyledDropdown<Map<String, dynamic>>(
+                            value: selectedCategory,
+                            items: categories.map((category) {
+                              return DropdownMenuItem<Map<String, dynamic>>(
+                                value: category,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: Color(int.parse(
+                                                category['iconColor']
+                                                    .replaceFirst('#', '0xFF')))
+                                            .withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Icon(
+                                        getIconData(category['iconName']),
+                                        color: Color(int.parse(
+                                            category['iconColor']
+                                                .replaceFirst('#', '0xFF'))),
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      category['name'],
                                       style: const TextStyle(
                                         fontSize: 16,
                                         color: Colors.black87,
                                       ),
                                     ),
-                                  );
-                                }).toList(),
-                                value: selectedWallet,
-                                onChanged: (value) {
-                                  setState(() {
-                                    selectedWallet = value;
-                                  });
-                                },
-                                hint: const Text(
-                                  'Wallet',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.black54,
-                                  ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              TextFormField(
-                                controller: _editDescription,
-                                maxLines: 3,
-                                decoration: InputDecoration(
-                                  labelText: 'Description',
-                                  labelStyle: const TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.black54,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  alignLabelWithHint: true,
-                                  isDense: true,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFFF1F1FA), width: 1),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFFF1F1FA), width: 1),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16.0),
-                                    borderSide: const BorderSide(
-                                        color: Color.fromRGBO(127, 61, 255, 1),
-                                        width: 1),
-                                  ),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF1F1FA),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 16),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              SizedBox(
-                                height: 56,
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    _handleContinue();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        const Color.fromRGBO(127, 61, 255, 1),
-                                    minimumSize:
-                                        const Size(double.infinity, 48),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: const Text('Continue',
-                                      style: TextStyle(
-                                          fontSize: 18, color: Colors.white)),
-                                ),
-                              ),
-                            ],
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              _onCategoryChanged(value!);
+                            },
+                            hint: 'Select Category',
                           ),
-                        ),
+                        ],
                       ),
-                    );
-                  }),
+
+                      // <<<<<< INSERTED BUDGET SELECTION HERE >>>>>>
+                      _buildBudgetSelection(),
+
+                      const SizedBox(height: 20),
+
+                      // Wallet Section
+                      _buildSectionCard(
+                        'Wallet',
+                        Icons.account_balance_wallet,
+                        [
+                          _buildStyledDropdown<String>(
+                            value: selectedWallet,
+                            items: wallets.map((item) {
+                              return DropdownMenuItem<String>(
+                                value: item,
+                                child: Text(item),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                selectedWallet = value;
+                              });
+                            },
+                            hint: 'Select Wallet',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      // Description Section
+                      _buildSectionCard(
+                        'Description',
+                        Icons.description,
+                        [
+                          _buildStyledTextField(
+                            controller: _editDescription,
+                            label: 'Description',
+                            maxLines: 3,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 100), // Space for FAB
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        floatingActionButton: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: const LinearGradient(
+              colors: [
+                Color.fromRGBO(253, 60, 74, 1), // red
+                Color.fromRGBO(253, 60, 74, 0.8), // red tint
+              ],
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color.fromRGBO(253, 60, 74, 0.4), // red shadow
+                blurRadius: 12,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: FloatingActionButton.extended(
+            onPressed: _handleContinue,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            icon: const Icon(Icons.check, color: Colors.white, size: 24),
+            label: const Text(
+              'Continue',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ],
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       ),
     );
   }
