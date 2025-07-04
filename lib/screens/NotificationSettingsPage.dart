@@ -28,9 +28,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
         _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
-        _budgetExceededAlerts = prefs.getBool('budget_exceeded_alerts') ?? true;
-        _budgetWarningAlerts = prefs.getBool('budget_warning_alerts') ?? true;
-        _dailySummary = prefs.getBool('daily_summary_notifications') ?? false;
+        _budgetExceededAlerts = prefs.getBool('budget_alerts_enabled') ?? true;
+        _budgetWarningAlerts = prefs.getBool('budget_warnings_enabled') ?? true;
+        _dailySummary = prefs.getBool('daily_reminders_enabled') ?? false;
         _isLoading = false;
       });
     } catch (e) {
@@ -43,15 +43,15 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
   Future<void> _saveSettings() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notifications_enabled', _notificationsEnabled);
-      await prefs.setBool('budget_exceeded_alerts', _budgetExceededAlerts);
-      await prefs.setBool('budget_warning_alerts', _budgetWarningAlerts);
-      await prefs.setBool('daily_summary_notifications', _dailySummary);
+      // Use the service method to save preferences
+      await BudgetNotificationService.setNotificationPreferences(
+        notificationsEnabled: _notificationsEnabled,
+        budgetAlertsEnabled: _budgetExceededAlerts,
+        budgetWarningsEnabled: _budgetWarningAlerts,
+        dailyRemindersEnabled: _dailySummary,
+      );
 
-      await BudgetNotificationService.setNotificationsEnabled(
-          _notificationsEnabled);
-
+      // Cancel all notifications if disabled
       if (!_notificationsEnabled) {
         await BudgetNotificationService.cancelAllNotifications();
       }
@@ -84,12 +84,18 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Test notification sent! (Implementation needed)'),
+          content: Text('Test notification sent!'),
           backgroundColor: Color.fromRGBO(127, 61, 255, 1),
         ),
       );
     } catch (e) {
       debugPrint("Error sending test notification: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sending test notification: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -314,6 +320,18 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
             ),
 
             // Daily Summary
+            _buildNotificationTile(
+              icon: Icons.today_outlined,
+              title: 'Daily Reminders',
+              subtitle: 'Get daily budget status reminders',
+              value: _dailySummary,
+              enabled: _notificationsEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _dailySummary = value;
+                });
+              },
+            ),
 
             const SizedBox(height: 24),
 
@@ -413,7 +431,50 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
 
             const SizedBox(height: 24),
 
-            // Additional Info
+            // Additional Info Section
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.grey[600],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'About Notifications',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '• Budget exceeded alerts are sent when you go over your budget limit\n'
+                    '• Budget warning alerts notify you when you reach 80% of your budget\n'
+                    '• Daily reminders provide a summary of your budget status\n'
+                    '• You can test notifications to ensure they work properly',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
