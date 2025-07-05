@@ -5,7 +5,7 @@ import 'dart:developer';
 class AdminStatsService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Cache for tax rates (similar to SalesTaxController pattern)
+  // Cache for tax rates
   Map<String, double> _cachedTaxRates = {};
   DateTime? _lastTaxCacheUpdate;
 
@@ -44,7 +44,88 @@ class AdminStatsService {
     }
   }
 
-  // Get total transactions count
+  Future<List<Map<String, dynamic>>> getUserDetails() async {
+    try {
+      final snapshot = await _firestore.collection('authentication').get();
+
+      List<Map<String, dynamic>> users = [];
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        users.add({
+          'email': data['email'] ?? 'Unknown',
+          'name': data['name'] ?? 'Unknown',
+          'signupMethod': data['signup_method'] ?? 'email',
+          'createdAt': data['created_at'] != null
+              ? (data['created_at'] as Timestamp).toDate()
+              : DateTime.now(),
+          'isActive': false,
+        });
+      }
+
+      return users;
+    } catch (e) {
+      log("Error getting user details: $e");
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getActiveUsersDetails() async {
+    try {
+      final thirtyDaysAgo = DateTime.now().subtract(const Duration(days: 30));
+      final transactionSnapshot = await _firestore
+          .collection('transactions')
+          .where('timestamp', isGreaterThan: thirtyDaysAgo)
+          .get();
+
+      Set<String> activeUserEmails = {};
+      Map<String, DateTime> lastActivityMap = {};
+
+      for (var doc in transactionSnapshot.docs) {
+        final email = doc.data()['email'];
+        final timestamp = (doc.data()['timestamp'] as Timestamp?)?.toDate();
+
+        if (email != null && timestamp != null) {
+          activeUserEmails.add(email);
+          if (!lastActivityMap.containsKey(email) ||
+              timestamp.isAfter(lastActivityMap[email]!)) {
+            lastActivityMap[email] = timestamp;
+          }
+        }
+      }
+
+      final userSnapshot = await _firestore
+          .collection('authentication')
+          .where('email', whereIn: activeUserEmails.toList())
+          .get();
+
+      List<Map<String, dynamic>> activeUsers = [];
+
+      for (var doc in userSnapshot.docs) {
+        final data = doc.data();
+        final email = data['email'];
+
+        activeUsers.add({
+          'email': email ?? 'Unknown',
+          'name': data['name'] ?? 'Unknown',
+          'signupMethod': data['signup_method'] ?? 'email',
+          'createdAt': data['created_at'] != null
+              ? (data['created_at'] as Timestamp).toDate()
+              : DateTime.now(),
+          'lastActivity': lastActivityMap[email] ?? DateTime.now(),
+          'isActive': true,
+        });
+      }
+
+      activeUsers
+          .sort((a, b) => b['lastActivity'].compareTo(a['lastActivity']));
+      return activeUsers;
+    } catch (e) {
+      log("Error getting active users details: $e");
+      return [];
+    }
+  }
+
   Future<int> getTotalTransactionsCount() async {
     try {
       final snapshot = await _firestore.collection('transactions').get();
@@ -55,7 +136,6 @@ class AdminStatsService {
     }
   }
 
-  // Get total expense amount across all users
   Future<double> getTotalExpenseAmount() async {
     try {
       final snapshot = await _firestore
@@ -80,7 +160,6 @@ class AdminStatsService {
     }
   }
 
-  // Get total income amount across all users
   Future<double> getTotalIncomeAmount() async {
     try {
       final snapshot = await _firestore
@@ -105,7 +184,6 @@ class AdminStatsService {
     }
   }
 
-  // Get category-wise expense data (updated to include global categories)
   Future<Map<String, double>> getCategoryWiseExpenses() async {
     try {
       final snapshot = await _firestore
@@ -138,7 +216,6 @@ class AdminStatsService {
     }
   }
 
-  // Get monthly transaction trends
   Future<List<Map<String, dynamic>>> getMonthlyTransactionTrends() async {
     try {
       final snapshot = await _firestore.collection('transactions').get();
@@ -172,7 +249,6 @@ class AdminStatsService {
         }
       }
 
-      // Convert to list and sort by date
       List<Map<String, dynamic>> trends = [];
       for (var entry in monthlyData.entries) {
         trends.add({
@@ -190,7 +266,6 @@ class AdminStatsService {
     }
   }
 
-  // Get user registration trends
   Future<List<Map<String, dynamic>>> getUserRegistrationTrends() async {
     try {
       final snapshot = await _firestore.collection('authentication').get();
@@ -204,7 +279,6 @@ class AdminStatsService {
         if (data.containsKey('created_at') && data['created_at'] != null) {
           registrationDate = (data['created_at'] as Timestamp).toDate();
         } else {
-          // Use current date as fallback (not ideal, but prevents errors)
           registrationDate = DateTime.now();
         }
 
@@ -230,7 +304,6 @@ class AdminStatsService {
     }
   }
 
-  // Get top spending users
   Future<List<Map<String, dynamic>>> getTopSpendingUsers(
       {int limit = 10}) async {
     try {
@@ -258,7 +331,6 @@ class AdminStatsService {
         userExpenses[email] = (userExpenses[email] ?? 0.0) + amountValue;
       }
 
-      // Convert to list and sort by expense amount
       List<Map<String, dynamic>> topUsers = [];
       for (var entry in userExpenses.entries) {
         topUsers.add({
@@ -275,10 +347,8 @@ class AdminStatsService {
     }
   }
 
-  // Load tax rates from database (similar to SalesTaxController)
   Future<Map<String, double>> _loadTaxRatesFromDatabase() async {
     try {
-      // Get tax rates from both global and user categories
       final globalCategoriesSnapshot =
           await _firestore.collection('global_categories').get();
       final userCategoriesSnapshot =
@@ -286,21 +356,18 @@ class AdminStatsService {
 
       Map<String, double> taxRates = {};
 
-      // Process global categories
       for (var doc in globalCategoriesSnapshot.docs) {
         final data = doc.data();
         final categoryName = data['name'];
         if (categoryName != null) {
-          // Set default tax rates based on category type
           if (categoryName == 'Healthcare' || categoryName == 'Housing') {
             taxRates[categoryName] = 0.0;
           } else {
-            taxRates[categoryName] = 0.18; // 18% default
+            taxRates[categoryName] = 0.18;
           }
         }
       }
 
-      // Override with user-specific tax rates
       for (var doc in userCategoriesSnapshot.docs) {
         final data = doc.data();
         final categoryName = data['name'];
@@ -321,7 +388,6 @@ class AdminStatsService {
     }
   }
 
-  // Get tax rates with caching
   Future<Map<String, double>> _getTaxRates() async {
     final now = DateTime.now();
 
@@ -334,7 +400,6 @@ class AdminStatsService {
     return await _loadTaxRatesFromDatabase();
   }
 
-  // Default tax rates fallback
   Map<String, double> _getDefaultTaxRates() {
     return {
       'Food & Dining': 0.18,
@@ -350,7 +415,6 @@ class AdminStatsService {
     };
   }
 
-  // Get sales tax statistics (updated to use proper tax rate loading)
   Future<Map<String, dynamic>> getSalesTaxStatistics() async {
     try {
       final snapshot = await _firestore
@@ -362,7 +426,6 @@ class AdminStatsService {
       double totalTaxAmount = 0.0;
       Map<String, double> categoryTaxes = {};
 
-      // Get tax rates using the cached method
       final taxRates = await _getTaxRates();
 
       for (var doc in snapshot.docs) {
@@ -408,7 +471,6 @@ class AdminStatsService {
     }
   }
 
-  // Get account types distribution (updated to handle better categorization)
   Future<Map<String, int>> getAccountTypesDistribution() async {
     try {
       final snapshot = await _firestore.collection('accounts').get();
@@ -421,7 +483,6 @@ class AdminStatsService {
         final accountName = data['account_name'] ?? '';
         String accountType = 'Unknown';
 
-        // Determine account type based on image or name
         if (accountImage.contains('wallet') ||
             accountName.toLowerCase().contains('wallet')) {
           accountType = 'Wallet';
@@ -455,27 +516,6 @@ class AdminStatsService {
     }
   }
 
-  // Get user types distribution
-  Future<Map<String, int>> getUserTypesDistribution() async {
-    try {
-      final snapshot = await _firestore.collection('authentication').get();
-
-      Map<String, int> userTypes = {};
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final userType = data['user_type'] ?? 'basic user';
-        userTypes[userType] = (userTypes[userType] ?? 0) + 1;
-      }
-
-      return userTypes;
-    } catch (e) {
-      log("Error getting user types distribution: $e");
-      return {};
-    }
-  }
-
-  // Get global categories statistics
   Future<Map<String, dynamic>> getGlobalCategoriesStats() async {
     try {
       final globalSnapshot =
@@ -498,7 +538,6 @@ class AdminStatsService {
     }
   }
 
-  // Get platform usage statistics (based on signup method)
   Future<Map<String, int>> getPlatformUsageStats() async {
     try {
       final snapshot = await _firestore.collection('authentication').get();
@@ -529,13 +568,11 @@ class AdminStatsService {
     }
   }
 
-  // Clear tax rates cache
   void clearTaxCache() {
     _cachedTaxRates.clear();
     _lastTaxCacheUpdate = null;
   }
 
-  // Get comprehensive dashboard data
   Future<Map<String, dynamic>> getDashboardData() async {
     try {
       final results = await Future.wait([
@@ -550,7 +587,6 @@ class AdminStatsService {
         getTopSpendingUsers(),
         getSalesTaxStatistics(),
         getAccountTypesDistribution(),
-        getUserTypesDistribution(),
         getGlobalCategoriesStats(),
         getPlatformUsageStats(),
       ]);
@@ -567,9 +603,8 @@ class AdminStatsService {
         'topSpendingUsers': results[8],
         'salesTaxStats': results[9],
         'accountTypesDistribution': results[10],
-        'userTypesDistribution': results[11],
-        'globalCategoriesStats': results[12],
-        'platformUsageStats': results[13],
+        'globalCategoriesStats': results[11],
+        'platformUsageStats': results[12],
       };
     } catch (e) {
       log("Error getting dashboard data: $e");
@@ -577,9 +612,6 @@ class AdminStatsService {
     }
   }
 
-  // Admin helper methods
-
-  // Check if current user is admin
   Future<bool> isCurrentUserAdmin() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -595,7 +627,7 @@ class AdminStatsService {
 
       if (snapshot.docs.isNotEmpty) {
         final userData = snapshot.docs.first.data();
-        return userData['user_type'] == 'admin' || userData['is_admin'] == true;
+        return userData['is_admin'] == true;
       }
 
       return false;
@@ -605,20 +637,17 @@ class AdminStatsService {
     }
   }
 
-  // Get system health statistics
   Future<Map<String, dynamic>> getSystemHealthStats() async {
     try {
       final now = DateTime.now();
       final lastHour = now.subtract(const Duration(hours: 1));
       final lastDay = now.subtract(const Duration(days: 1));
 
-      // Get recent transactions
       final recentTransactionsSnapshot = await _firestore
           .collection('transactions')
           .where('timestamp', isGreaterThan: lastHour)
           .get();
 
-      // Get recent user registrations
       final recentUsersSnapshot = await _firestore
           .collection('authentication')
           .where('created_at', isGreaterThan: lastDay)

@@ -172,13 +172,14 @@ class SalesTaxController {
       return snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return {
-          'transaction_id': data['transaction_id'],
-          'category_name': data['category_name'],
+          'transaction_id': data['transaction_id'] ?? '',
+          'category_name':
+              data['category_name'] ?? 'Unknown', // Safe null handling
           'amount': data['amount'] is String
               ? double.tryParse(data['amount']) ?? 0.0
               : (data['amount'] ?? 0.0).toDouble(),
           'timestamp': data['timestamp'],
-          'description': data['description'],
+          'description': data['description'] ?? '', // Safe null handling
         };
       }).toList();
     } catch (e) {
@@ -187,6 +188,7 @@ class SalesTaxController {
     }
   }
 
+  /// Calculates total sales tax for transactions within date range
   /// Calculates total sales tax for transactions within date range
   Future<Map<String, dynamic>> calculateTotalSalesTax({
     DateTime? startDate,
@@ -207,8 +209,12 @@ class SalesTaxController {
       Map<String, double> categoryWiseAmount = {};
 
       for (final transaction in transactions) {
-        final categoryName = transaction['category_name'] as String;
-        final amount = transaction['amount'] as double;
+        // Safe null handling for category_name
+        final categoryName =
+            transaction['category_name'] as String? ?? 'Unknown';
+
+        // Safe null handling for amount
+        final amount = transaction['amount'] as double? ?? 0.0;
 
         final taxRate = taxRates[categoryName] ?? 0.0;
         final salesTax = taxRate > 0 ? amount * taxRate : 0.0;

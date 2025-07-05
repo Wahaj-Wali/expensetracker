@@ -7,15 +7,16 @@ class TransactionController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final uuid = const Uuid();
 
-  // Process a regular transaction or a split bill transaction
+  // Process a regular transaction or a split bill transaction (with budget support)
   Future<Map<String, dynamic>> processTransaction({
     required double amount,
     required String accountName,
     required String transactionType,
     String? categoryName, // Optional for transfers
     String? description,
-    String? splitBillId, // New parameter for split bills
-    bool isSplitBill = false, // New parameter to identify split bills
+    String? splitBillId, // For split bills
+    bool isSplitBill = false, // To identify split bills
+    String? budgetId, // <-- NEW PARAMETER
   }) async {
     try {
       // Retrieve email from SharedPreferences
@@ -90,6 +91,11 @@ class TransactionController {
           }
         }
 
+        // ADD: budget_id if provided and it's an Expense
+        if (budgetId != null && transactionType == "Expense") {
+          transactionData['budget_id'] = budgetId;
+        }
+
         // Update the balance field in Firestore
         transaction.update(accountRef, {'balance': updatedBalance});
 
@@ -98,6 +104,15 @@ class TransactionController {
           _firestore.collection('transactions').doc(transactionId),
           transactionData,
         );
+
+        // ADD: Update the budget's spent_amount if budgetId is provided and Expense
+        if (budgetId != null && transactionType == "Expense") {
+          DocumentReference budgetRef =
+              _firestore.collection('budgets').doc(budgetId);
+          transaction.update(budgetRef, {
+            'spent_amount': FieldValue.increment(amount),
+          });
+        }
       });
 
       // Return success with transaction ID
@@ -249,9 +264,7 @@ class TransactionController {
     }
   }
 
-  // Existing _deleteRegularTransaction and _deleteTransferTransaction methods remain the same
-  // ... [Keep the rest of your existing TransactionController code]
-
+  // Modify the _deleteRegularTransaction method to handle budget reverse
   Future<Map<String, dynamic>> _deleteRegularTransaction(
       DocumentSnapshot transactionSnapshot,
       Map<String, dynamic> transactionData,
@@ -318,6 +331,18 @@ class TransactionController {
 
       // Delete the transaction document
       transaction.delete(transactionSnapshot.reference);
+
+      // ADD: Reverse budget spent if budget_id exists
+      if (transactionData.containsKey('budget_id')) {
+        String budgetId = transactionData['budget_id'];
+        DocumentReference budgetRef =
+            _firestore.collection('budgets').doc(budgetId);
+
+        // Use FieldValue.increment with a negative value to subtract
+        transaction.update(budgetRef, {
+          'spent_amount': FieldValue.increment(-amount),
+        });
+      }
     });
 
     return {
