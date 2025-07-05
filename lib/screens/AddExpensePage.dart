@@ -1,10 +1,11 @@
 import 'dart:math';
-import 'package:ExpenseTracker/Services/BudgetService2.dart';
+
+import 'package:ExpenseTracker/Services/BudgetService.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/material.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
-import 'package:ExpenseTracker/Services/BudgetModificationController.dart';
+
 import 'package:ExpenseTracker/Services/TransactionController.dart';
 import 'package:ExpenseTracker/screens/DetailTransactionPage.dart';
 import 'package:ExpenseTracker/widgets/custom_loader.dart';
@@ -645,97 +646,125 @@ class _AddExpensePageState extends State<AddExpensePage>
                       Text('Loading budgets...'),
                     ],
                   )
-                : DropdownButton<Map<String, dynamic>>(
-                    value: selectedBudget,
-                    hint: const Text('Select Budget (Optional)'),
-                    isExpanded: true,
-                    underline: const SizedBox(),
-                    items: [
-                      // Add "None" option
-                      const DropdownMenuItem<Map<String, dynamic>>(
-                        value: null,
-                        child: Text('None'),
-                      ),
-                      // Add budget options
-                      ...availableBudgets.map((budget) {
-                        double remaining =
-                            BudgetService.getRemainingAmount(budget);
-                        double progress =
-                            BudgetService.getBudgetProgress(budget);
-                        bool isExceeded =
-                            BudgetService.isBudgetExceeded(budget);
-
-                        return DropdownMenuItem<Map<String, dynamic>>(
-                          value: budget,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                budget['name'] ?? 'Unknown Budget',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                  color: isExceeded ? Colors.red : Colors.black,
-                                ),
-                              ),
-                              Text(
-                                'Remaining: ${remaining.toStringAsFixed(2)} (${progress.toStringAsFixed(1)}%)',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isExceeded ? Colors.red : Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        selectedBudget = value;
-                      });
-                    },
-                  ),
+                : _buildBudgetTabs(),
           ),
           if (selectedBudget != null) ...[
             const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Budget: ${selectedBudget!['name']}',
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Amount: ${selectedBudget!['amount'].toString()}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  Text(
-                    'Spent: ${selectedBudget!['spent_amount'].toString()}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  Text(
-                    'Remaining: ${BudgetService.getRemainingAmount(selectedBudget!).toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: BudgetService.isBudgetExceeded(selectedBudget!)
-                          ? Colors.red
-                          : Colors.green,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildBudgetTabs() {
+    // Create a list with "None" option + available budgets
+    final List<Map<String, dynamic>?> budgetOptions = [
+      null, // None option
+      ...availableBudgets,
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: budgetOptions.map((budget) {
+          final bool isSelected = selectedBudget == budget;
+          final bool isNone = budget == null;
+
+          if (isNone) {
+            return _buildBudgetTab(
+              title: 'None',
+              subtitle: 'No budget',
+              isSelected: isSelected,
+              isExceeded: false,
+              onTap: () {
+                setState(() {
+                  selectedBudget = null;
+                });
+              },
+            );
+          }
+
+          final double remaining = BudgetService.getRemainingAmount(budget!);
+          final double progress = BudgetService.getBudgetProgress(budget);
+          final bool isExceeded = BudgetService.isBudgetExceeded(budget);
+
+          return _buildBudgetTab(
+            title: budget['name'] ?? 'Unknown Budget',
+            subtitle:
+                'Remaining: ${remaining.toStringAsFixed(0)} (${progress.toStringAsFixed(1)}%)',
+            isSelected: isSelected,
+            isExceeded: isExceeded,
+            onTap: () {
+              setState(() {
+                selectedBudget = budget;
+              });
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildBudgetTab({
+    required String title,
+    required String subtitle,
+    required bool isSelected,
+    required bool isExceeded,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(right: 12),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 160,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? (isExceeded ? Colors.red.shade50 : Colors.blue.shade50)
+                : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? (isExceeded ? Colors.red : Colors.blue)
+                  : Colors.grey.shade300,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected
+                      ? (isExceeded ? Colors.red : Colors.blue)
+                      : Colors.black87,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isSelected
+                      ? (isExceeded
+                          ? Colors.red.shade700
+                          : Colors.blue.shade700)
+                      : Colors.grey.shade600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -756,13 +785,13 @@ class _AddExpensePageState extends State<AddExpensePage>
               // Header
               Container(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      const Color.fromRGBO(253, 60, 74, 1), // red
-                      const Color.fromRGBO(253, 60, 74, 0.8), // red tint
+                      Color.fromRGBO(253, 60, 74, 1), // red
+                      Color.fromRGBO(253, 60, 74, 0.8), // red tint
                     ],
                   ),
                 ),

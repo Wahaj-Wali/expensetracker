@@ -378,11 +378,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                           'Number of Transactions:',
                           _expenseTransactionCount.toString(),
                         ),
-                        const Divider(height: 24),
-                        _buildSalesTaxRow(
-                          'Average Tax Rate:',
-                          '${_averageTaxRate.toStringAsFixed(2)}%',
-                        ),
+
                         // Category-wise breakdown (optional, only if data exists)
                         if (_categoryWiseTax.isNotEmpty) ...[
                           const Divider(height: 24),
